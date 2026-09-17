@@ -1,10 +1,11 @@
-from fastapi import FastAPI, Request, Depends
+from fastapi import FastAPI, Depends
 from datetime import datetime
 from sqlalchemy.orm import Session
-import json
 
 from app.database import Base, engine, get_db
 from app.models import Lead
+from app.schemas.lead import LeadCreate
+from app.dialer.service import queue_lead
 
 
 # Create database tables
@@ -17,14 +18,12 @@ app = FastAPI(
     version="1.0.0"
 )
 
-
 @app.get("/")
 def root():
     return {
         "status": "success",
         "message": "AI Auto Dialer Backend is running"
     }
-
 
 @app.get("/health")
 def health():
@@ -35,7 +34,7 @@ def health():
 
 @app.post("/api/v1/webhooks/zoho/lead")
 async def zoho_lead_webhook(
-    request: Request,
+    lead: LeadCreate,
     db: Session = Depends(get_db)
 ):
 
@@ -43,36 +42,18 @@ async def zoho_lead_webhook(
     print("ZOHO CRM WEBHOOK RECEIVED")
     print("=" * 60)
 
-    # Request headers
-    print("\n--- REQUEST HEADERS ---")
-    for key, value in request.headers.items():
-        print(f"{key}: {value}")
+    print("\n--- VALIDATED LEAD DATA ---")
+    print(lead.model_dump())
 
-    # Read JSON body
-    try:
-        body = await request.json()
+    zoho_lead_id = lead.lead_id
 
-        print("\n--- LEAD DATA ---")
-        print(json.dumps(body, indent=2))
 
-    except Exception as e:
-        print("\nERROR READING JSON:")
-        print(str(e))
-
-        return {
-            "status": "error",
-            "message": "Invalid JSON received"
-        }
-
-    # Extract lead data
-    zoho_lead_id = body.get("lead_id")
-
-    # Check if lead already exists
     existing_lead = db.query(Lead).filter(
         Lead.zoho_lead_id == zoho_lead_id
     ).first()
 
     if existing_lead:
+
         print("\nLead already exists in PostgreSQL.")
 
         return {
@@ -81,35 +62,42 @@ async def zoho_lead_webhook(
             "lead_id": zoho_lead_id
         }
 
-    # Create new lead
     new_lead = Lead(
-        zoho_lead_id=zoho_lead_id,
-        first_name=body.get("first_name"),
-        last_name=body.get("last_name"),
-        company=body.get("company"),
-        phone=body.get("phone"),
-        email=body.get("email"),
-        lead_source=body.get("lead_source"),
-        lead_status=body.get("lead_status")
+        zoho_lead_id=lead.lead_id,
+        first_name=lead.first_name,
+        last_name=lead.last_name,
+        company=lead.company,
+        phone=lead.phone,
+        email=lead.email,
+        lead_source=lead.lead_source,
+        lead_status=lead.lead_status
     )
 
-    # Save to PostgreSQL
     db.add(new_lead)
     db.commit()
     db.refresh(new_lead)
+
 
     print("\n--- POSTGRESQL ---")
     print("Lead saved successfully!")
     print(f"Database ID: {new_lead.id}")
     print(f"Zoho Lead ID: {new_lead.zoho_lead_id}")
 
+    dialer_data = queue_lead(new_lead, db)
+
+    print("\n--- DIALER QUEUE ---")
+    print("Lead added to dialer queue!")
+    print(dialer_data)
+
     print("\n--- WEBHOOK PROCESSING COMPLETE ---")
     print("=" * 60 + "\n")
 
+
     return {
         "status": "success",
-        "message": "Lead received and saved to PostgreSQL",
+        "message": "Lead received, saved and queued for dialing",
         "database_id": new_lead.id,
         "zoho_lead_id": new_lead.zoho_lead_id,
+        "dialer": dialer_data,
         "received_at": datetime.now().isoformat()
     }
