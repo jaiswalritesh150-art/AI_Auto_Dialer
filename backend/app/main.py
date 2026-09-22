@@ -8,6 +8,12 @@ from app.models import Lead, CallQueue, CallAttempt
 from app.schemas.lead import LeadCreate
 from app.schemas.call import CallResultRequest
 
+from app.telephony.service import (
+    initiate_call,
+    get_call_status,
+    end_call
+)
+
 from app.dialer.service import (
     queue_lead,
     process_next_call,
@@ -460,3 +466,92 @@ def call_result(
         "message": "Call result processed successfully",
         "call": result
     }
+    
+# =====================================================
+# INITIATE TELEPHONY CALL
+# =====================================================
+
+@app.post("/api/v1/telephony/call/{queue_id}")
+def initiate_telephony_call(
+    queue_id: int,
+    db: Session = Depends(get_db)
+):
+
+    # Find queue item
+    queue_item = (
+        db.query(CallQueue)
+        .filter(CallQueue.id == queue_id)
+        .first()
+    )
+
+    if not queue_item:
+        raise HTTPException(
+            status_code=404,
+            detail="Call queue item not found"
+        )
+
+    # Call must already be picked by dialer
+    if queue_item.status != "calling":
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Call is not ready for telephony. "
+                f"Current status: {queue_item.status}"
+            )
+        )
+
+    # Find the latest call attempt
+    attempt = (
+        db.query(CallAttempt)
+        .filter(CallAttempt.queue_id == queue_id)
+        .order_by(CallAttempt.attempt_number.desc())
+        .first()
+    )
+
+    if not attempt:
+        raise HTTPException(
+            status_code=400,
+            detail="No call attempt found for this queue"
+        )
+
+    # Initiate telephony call
+    call = initiate_call(
+        phone=queue_item.phone,
+        queue_id=queue_item.id,
+        attempt_id=attempt.id
+    )
+
+    if not call.get("success"):
+        raise HTTPException(
+            status_code=400,
+            detail=call.get("message")
+        )
+
+    return {
+        "status": "success",
+        "message": "Telephony call initiated",
+        "call": call
+    }
+
+# =====================================================
+# GET TELEPHONY CALL STATUS
+# =====================================================
+
+@app.get("/api/v1/telephony/call/{call_id}")
+def telephony_call_status(
+    call_id: str
+):
+
+    return get_call_status(call_id)
+
+
+# =====================================================
+# END TELEPHONY CALL
+# =====================================================
+
+@app.post("/api/v1/telephony/call/{call_id}/end")
+def telephony_end_call(
+    call_id: str
+):
+
+    return end_call(call_id)
