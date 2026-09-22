@@ -1,15 +1,17 @@
 from fastapi import FastAPI, Depends, HTTPException
 from datetime import datetime
 from sqlalchemy.orm import Session
-from app.schemas.call import CallResultRequest
 
 from app.database import Base, engine, get_db
 from app.models import Lead, CallQueue, CallAttempt
+
 from app.schemas.lead import LeadCreate
+from app.schemas.call import CallResultRequest
 
 from app.dialer.service import (
     queue_lead,
     process_next_call,
+    process_specific_call,
     handle_call_result
 )
 
@@ -133,6 +135,90 @@ def get_call_queue(
         ]
     }
 
+# =====================================================
+# GET ALL CALL ATTEMPTS
+# =====================================================
+
+@app.get("/api/v1/call-attempts")
+def get_call_attempts(
+    db: Session = Depends(get_db)
+):
+
+    attempts = (
+        db.query(CallAttempt)
+        .order_by(CallAttempt.id.desc())
+        .all()
+    )
+
+    return {
+        "status": "success",
+        "count": len(attempts),
+        "call_attempts": [
+            {
+                "id": attempt.id,
+                "queue_id": attempt.queue_id,
+                "attempt_number": attempt.attempt_number,
+                "status": attempt.status,
+                "started_at": attempt.started_at,
+                "ended_at": attempt.ended_at,
+                "result": attempt.result,
+                "failure_reason": attempt.failure_reason
+            }
+            for attempt in attempts
+        ]
+    }
+
+
+# =====================================================
+# GET CALL ATTEMPTS FOR SPECIFIC QUEUE
+# =====================================================
+
+@app.get("/api/v1/call-attempts/{queue_id}")
+def get_queue_call_attempts(
+    queue_id: int,
+    db: Session = Depends(get_db)
+):
+
+    # Find queue
+    queue_item = (
+        db.query(CallQueue)
+        .filter(CallQueue.id == queue_id)
+        .first()
+    )
+
+    if not queue_item:
+        raise HTTPException(
+            status_code=404,
+            detail="Call queue item not found"
+        )
+
+    # Find attempts for this queue
+    attempts = (
+        db.query(CallAttempt)
+        .filter(CallAttempt.queue_id == queue_id)
+        .order_by(CallAttempt.attempt_number.asc())
+        .all()
+    )
+
+    return {
+        "status": "success",
+        "queue_id": queue_id,
+        "phone": queue_item.phone,
+        "queue_status": queue_item.status,
+        "attempt_count": len(attempts),
+        "attempts": [
+            {
+                "id": attempt.id,
+                "attempt_number": attempt.attempt_number,
+                "status": attempt.status,
+                "started_at": attempt.started_at,
+                "ended_at": attempt.ended_at,
+                "result": attempt.result,
+                "failure_reason": attempt.failure_reason
+            }
+            for attempt in attempts
+        ]
+    }
 
 # =====================================================
 # PROCESS NEXT CALL
@@ -154,6 +240,34 @@ def process_next_dialer_call(
     return {
         "status": "success",
         "message": "Next call picked and call attempt started",
+        "call": result
+    }
+
+
+# =====================================================
+# PROCESS SPECIFIC CALL
+# =====================================================
+
+@app.post("/api/v1/dialer/process/{queue_id}")
+def process_specific_dialer_call(
+    queue_id: int,
+    db: Session = Depends(get_db)
+):
+
+    result = process_specific_call(
+        queue_id=queue_id,
+        db=db
+    )
+
+    if result.get("success") is False:
+        raise HTTPException(
+            status_code=404,
+            detail=result["message"]
+        )
+
+    return {
+        "status": "success",
+        "message": "Specific call picked and call attempt started",
         "call": result
     }
 
@@ -314,7 +428,12 @@ async def zoho_lead_webhook(
 
         "received_at": datetime.now().isoformat()
     }
-    
+
+
+# =====================================================
+# CALL RESULT
+# =====================================================
+
 @app.post("/api/v1/dialer/call-result")
 def call_result(
     request: CallResultRequest,
