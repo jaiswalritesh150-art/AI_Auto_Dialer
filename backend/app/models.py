@@ -3,7 +3,6 @@ from datetime import datetime
 
 from app.database import Base
 
-
 class Lead(Base):
     __tablename__ = "leads"
 
@@ -22,13 +21,16 @@ class Lead(Base):
     lead_source = Column(String(100), nullable=True)
     lead_status = Column(String(100), nullable=True)
 
+    # Lead scoring
+    lead_score = Column(Integer, default=0, nullable=False)
+    priority = Column(String(20), default="LOW", nullable=False)
+
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(
         DateTime,
         default=datetime.utcnow,
         onupdate=datetime.utcnow
     )
-
 
 class CallQueue(Base):
     __tablename__ = "call_queue"
