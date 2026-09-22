@@ -74,3 +74,75 @@ def process_next_call(db: Session):
         "attempt_status": attempt.status,
         "started_at": attempt.started_at,
     }
+    
+def handle_call_result(
+    queue_id: int,
+    attempt_id: int,
+    status: str,
+    result: str | None,
+    failure_reason: str | None,
+    db: Session
+):
+    """
+    Update CallAttempt and CallQueue after a call finishes.
+    """
+
+    # Find queue item
+    queue_item = (
+        db.query(CallQueue)
+        .filter(CallQueue.id == queue_id)
+        .first()
+    )
+
+    if not queue_item:
+        return {
+            "success": False,
+            "message": "Call queue item not found"
+        }
+
+    # Find call attempt
+    attempt = (
+        db.query(CallAttempt)
+        .filter(CallAttempt.id == attempt_id)
+        .first()
+    )
+
+    if not attempt:
+        return {
+            "success": False,
+            "message": "Call attempt not found"
+        }
+
+    # Make sure attempt belongs to this queue
+    if attempt.queue_id != queue_id:
+        return {
+            "success": False,
+            "message": "Call attempt does not belong to this queue"
+        }
+
+    # Update CallAttempt
+    attempt.status = status
+    attempt.result = result
+    attempt.failure_reason = failure_reason
+    attempt.ended_at = datetime.utcnow()
+
+    # Update CallQueue
+    queue_item.status = status
+    queue_item.completed_at = datetime.utcnow()
+    queue_item.failure_reason = failure_reason
+
+    db.commit()
+
+    db.refresh(attempt)
+    db.refresh(queue_item)
+
+    return {
+        "queue_id": queue_item.id,
+        "attempt_id": attempt.id,
+        "queue_status": queue_item.status,
+        "attempt_status": attempt.status,
+        "result": attempt.result,
+        "failure_reason": attempt.failure_reason,
+        "ended_at": attempt.ended_at,
+        "completed_at": queue_item.completed_at
+    }

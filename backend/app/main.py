@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Depends, HTTPException
 from datetime import datetime
 from sqlalchemy.orm import Session
+from app.schemas.call import CallResultRequest
 
 from app.database import Base, engine, get_db
 from app.models import Lead, CallQueue, CallAttempt
@@ -8,7 +9,8 @@ from app.schemas.lead import LeadCreate
 
 from app.dialer.service import (
     queue_lead,
-    process_next_call
+    process_next_call,
+    handle_call_result
 )
 
 from app.dialer.scoring import calculate_lead_score
@@ -311,4 +313,31 @@ async def zoho_lead_webhook(
         "dialer": dialer_data,
 
         "received_at": datetime.now().isoformat()
+    }
+    
+@app.post("/api/v1/dialer/call-result")
+def call_result(
+    request: CallResultRequest,
+    db: Session = Depends(get_db)
+):
+
+    result = handle_call_result(
+        queue_id=request.queue_id,
+        attempt_id=request.attempt_id,
+        status=request.status,
+        result=request.result,
+        failure_reason=request.failure_reason,
+        db=db
+    )
+
+    if "success" in result and result["success"] is False:
+        raise HTTPException(
+            status_code=404,
+            detail=result["message"]
+        )
+
+    return {
+        "status": "success",
+        "message": "Call result processed successfully",
+        "call": result
     }
