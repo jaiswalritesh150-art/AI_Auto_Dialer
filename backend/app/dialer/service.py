@@ -5,6 +5,10 @@ from sqlalchemy.orm import Session
 from app.models import CallQueue, CallAttempt
 
 
+# =====================================================
+# QUEUE LEAD
+# =====================================================
+
 def queue_lead(lead, db: Session):
     """
     Add a lead to the PostgreSQL call queue.
@@ -32,10 +36,15 @@ def queue_lead(lead, db: Session):
     }
 
 
+# =====================================================
+# PROCESS NEXT CALL
+# =====================================================
+
 def process_next_call(db: Session):
     """
-    Pick the next queued lead and create a call attempt.
-    Actual telephony provider will be connected later.
+    Pick the oldest queued call and create the next call attempt.
+
+    Maximum attempts = 3.
     """
 
     # Find the oldest queued call
@@ -49,14 +58,42 @@ def process_next_call(db: Session):
     if not queue_item:
         return None
 
+    # Count previous attempts
+    previous_attempts = (
+        db.query(CallAttempt)
+        .filter(CallAttempt.queue_id == queue_item.id)
+        .count()
+    )
+
+    # Calculate next attempt number
+    attempt_number = previous_attempts + 1
+
+    # Safety check
+    if attempt_number > 3:
+        queue_item.status = "failed"
+        queue_item.completed_at = datetime.utcnow()
+        queue_item.failure_reason = "Maximum call attempts reached"
+
+        db.commit()
+
+        return {
+            "queue_id": queue_item.id,
+            "phone": queue_item.phone,
+            "queue_status": queue_item.status,
+            "message": "Maximum call attempts reached"
+        }
+
     # Mark queue item as calling
     queue_item.status = "calling"
-    queue_item.started_at = datetime.utcnow()
 
-    # Create first call attempt
+    # Set initial start time only once
+    if queue_item.started_at is None:
+        queue_item.started_at = datetime.utcnow()
+
+    # Create new call attempt
     attempt = CallAttempt(
         queue_id=queue_item.id,
-        attempt_number=1,
+        attempt_number=attempt_number,
         status="started",
         started_at=datetime.utcnow()
     )
@@ -74,20 +111,25 @@ def process_next_call(db: Session):
         "attempt_status": attempt.status,
         "started_at": attempt.started_at,
     }
-    
-def handle_call_result(
+
+
+# =====================================================
+# PROCESS SPECIFIC CALL
+# =====================================================
+
+def process_specific_call(
     queue_id: int,
-    attempt_id: int,
-    status: str,
-    result: str | None,
-    failure_reason: str | None,
     db: Session
 ):
     """
-    Update CallAttempt and CallQueue after a call finishes.
+    Process a specific call queue item using queue_id.
+
+    Creates the next call attempt for that queue.
+
+    Maximum attempts = 3.
     """
 
-    # Find queue item
+    # Find specific queue item
     queue_item = (
         db.query(CallQueue)
         .filter(CallQueue.id == queue_id)
@@ -100,7 +142,118 @@ def handle_call_result(
             "message": "Call queue item not found"
         }
 
-    # Find call attempt
+    # Only queued calls can be processed
+    if queue_item.status != "queued":
+        return {
+            "success": False,
+            "message": (
+                f"Call is not queued. "
+                f"Current status: {queue_item.status}"
+            )
+        }
+
+    # Count previous attempts
+    previous_attempts = (
+        db.query(CallAttempt)
+        .filter(CallAttempt.queue_id == queue_id)
+        .count()
+    )
+
+    # Calculate next attempt number
+    attempt_number = previous_attempts + 1
+
+    # Maximum 3 attempts
+    if attempt_number > 3:
+        queue_item.status = "failed"
+        queue_item.completed_at = datetime.utcnow()
+        queue_item.failure_reason = "Maximum call attempts reached"
+
+        db.commit()
+
+        return {
+            "success": False,
+            "message": "Maximum call attempts reached",
+            "queue_id": queue_id
+        }
+
+    # Mark queue as calling
+    queue_item.status = "calling"
+
+    # Keep original started_at
+    if queue_item.started_at is None:
+        queue_item.started_at = datetime.utcnow()
+
+    # Create new call attempt
+    attempt = CallAttempt(
+        queue_id=queue_item.id,
+        attempt_number=attempt_number,
+        status="started",
+        started_at=datetime.utcnow()
+    )
+
+    db.add(attempt)
+    db.commit()
+    db.refresh(attempt)
+
+    return {
+        "success": True,
+        "queue_id": queue_item.id,
+        "phone": queue_item.phone,
+        "queue_status": queue_item.status,
+        "attempt_id": attempt.id,
+        "attempt_number": attempt.attempt_number,
+        "attempt_status": attempt.status,
+        "started_at": attempt.started_at
+    }
+
+
+# =====================================================
+# HANDLE CALL RESULT
+# =====================================================
+
+def handle_call_result(
+    queue_id: int,
+    attempt_id: int,
+    status: str,
+    result: str | None,
+    failure_reason: str | None,
+    db: Session
+):
+    """
+    Process the result of a call attempt.
+
+    Successful call:
+        completed
+
+    Retryable results:
+        no_answer
+        busy
+        failed
+
+    Maximum attempts:
+        3
+    """
+
+    # =================================================
+    # FIND QUEUE ITEM
+    # =================================================
+
+    queue_item = (
+        db.query(CallQueue)
+        .filter(CallQueue.id == queue_id)
+        .first()
+    )
+
+    if not queue_item:
+        return {
+            "success": False,
+            "message": "Call queue item not found"
+        }
+
+    # =================================================
+    # FIND CALL ATTEMPT
+    # =================================================
+
     attempt = (
         db.query(CallAttempt)
         .filter(CallAttempt.id == attempt_id)
@@ -113,20 +266,124 @@ def handle_call_result(
             "message": "Call attempt not found"
         }
 
-    # Make sure attempt belongs to this queue
+    # =================================================
+    # VERIFY ATTEMPT BELONGS TO QUEUE
+    # =================================================
+
     if attempt.queue_id != queue_id:
         return {
             "success": False,
             "message": "Call attempt does not belong to this queue"
         }
 
-    # Update CallAttempt
+    # =================================================
+    # UPDATE ATTEMPT
+    # =================================================
+
     attempt.status = status
     attempt.result = result
     attempt.failure_reason = failure_reason
     attempt.ended_at = datetime.utcnow()
 
-    # Update CallQueue
+    # =================================================
+    # COMPLETED CALL
+    # =================================================
+
+    if status == "completed":
+
+        queue_item.status = "completed"
+        queue_item.completed_at = datetime.utcnow()
+        queue_item.failure_reason = None
+
+        db.commit()
+
+        db.refresh(attempt)
+        db.refresh(queue_item)
+
+        return {
+            "queue_id": queue_item.id,
+            "attempt_id": attempt.id,
+            "attempt_number": attempt.attempt_number,
+            "queue_status": queue_item.status,
+            "attempt_status": attempt.status,
+            "result": attempt.result,
+            "failure_reason": attempt.failure_reason,
+            "ended_at": attempt.ended_at,
+            "completed_at": queue_item.completed_at,
+            "retry": False
+        }
+
+    # =================================================
+    # RETRYABLE RESULTS
+    # =================================================
+
+    retryable_results = {
+        "no_answer",
+        "busy",
+        "failed"
+    }
+
+    if result in retryable_results:
+
+        # Retry available
+        if attempt.attempt_number < 3:
+
+            queue_item.status = "queued"
+            queue_item.completed_at = None
+            queue_item.failure_reason = failure_reason
+
+            db.commit()
+
+            db.refresh(attempt)
+            db.refresh(queue_item)
+
+            return {
+                "queue_id": queue_item.id,
+                "attempt_id": attempt.id,
+                "attempt_number": attempt.attempt_number,
+                "queue_status": queue_item.status,
+                "attempt_status": attempt.status,
+                "result": attempt.result,
+                "failure_reason": attempt.failure_reason,
+                "ended_at": attempt.ended_at,
+                "completed_at": queue_item.completed_at,
+                "retry": True,
+                "next_attempt": attempt.attempt_number + 1
+            }
+
+        # =================================================
+        # MAXIMUM ATTEMPTS REACHED
+        # =================================================
+
+        queue_item.status = "failed"
+        queue_item.completed_at = datetime.utcnow()
+        queue_item.failure_reason = (
+            failure_reason or "Maximum call attempts reached"
+        )
+
+        db.commit()
+
+        db.refresh(attempt)
+        db.refresh(queue_item)
+
+        return {
+            "queue_id": queue_item.id,
+            "attempt_id": attempt.id,
+            "attempt_number": attempt.attempt_number,
+            "queue_status": queue_item.status,
+            "attempt_status": attempt.status,
+            "result": attempt.result,
+            "failure_reason": queue_item.failure_reason,
+            "ended_at": attempt.ended_at,
+            "completed_at": queue_item.completed_at,
+            "retry": False,
+            "message": "Maximum call attempts reached"
+        }
+
+    # =================================================
+    # OTHER / UNKNOWN STATUS
+    # =================================================
+
     queue_item.status = status
     queue_item.completed_at = datetime.utcnow()
     queue_item.failure_reason = failure_reason
@@ -139,10 +396,12 @@ def handle_call_result(
     return {
         "queue_id": queue_item.id,
         "attempt_id": attempt.id,
+        "attempt_number": attempt.attempt_number,
         "queue_status": queue_item.status,
         "attempt_status": attempt.status,
         "result": attempt.result,
         "failure_reason": attempt.failure_reason,
         "ended_at": attempt.ended_at,
-        "completed_at": queue_item.completed_at
+        "completed_at": queue_item.completed_at,
+        "retry": False
     }
