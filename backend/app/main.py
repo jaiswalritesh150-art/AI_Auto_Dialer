@@ -39,7 +39,8 @@ from app.ai.analyzer import analyze_call_transcript
 
 from app.telephony.ai_agent import (
     generate_response,
-    detect_call_decision
+    detect_call_decision,
+    extract_callback_time
 )
 
 # =====================================================
@@ -1025,9 +1026,29 @@ def ai_call_message(
         "no_further_contact"
     }
 
+    # =====================================================
+    # AUTOMATIC CALLBACK SCHEDULING
+    # =====================================================
+
+    callback_scheduled = False
+    callback_at = None
+
+    if decision_type == "callback_requested":
+        callback_at = extract_callback_time(request.message)
+
+        if callback_at:
+            callback_result = schedule_callback(
+                queue_id=queue_id,
+                callback_at=callback_at,
+                db=db
+            )
+
+            callback_scheduled = callback_result.get("success", False)
+        
+    
     call_ended = False
 
-    if decision_type in terminal_decisions:
+    if decision_type in terminal_decisions and decision_type != "callback_requested":
 
         now = datetime.utcnow()
 
