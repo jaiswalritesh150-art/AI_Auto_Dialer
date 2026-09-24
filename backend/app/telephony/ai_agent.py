@@ -258,50 +258,59 @@ Rules:
 # =====================================================
 
 from datetime import datetime, timedelta
+import re
 
 
 def extract_callback_time(message: str):
     """
-    Extract a basic callback time from the user's message.
+    Extract callback time from common natural-language phrases.
 
-    Supports common phrases such as:
+    Supports:
     - tomorrow
-    - today
-    - tomorrow morning
-    - tomorrow afternoon
-    - tomorrow evening
+    - tomorrow morning / afternoon / evening
+    - tomorrow at 5 PM
+    - tomorrow around 3:30 PM
+    - today at 6 PM
+    - today evening
     """
 
-    text = message.lower()
+    text = message.lower().strip()
     now = datetime.utcnow()
 
+    # Determine callback date
     if "tomorrow" in text:
         callback_date = now + timedelta(days=1)
+    elif "today" in text:
+        callback_date = now
+    else:
+        return None
 
-        if "morning" in text:
+    # Specific time
+    time_match = re.search(
+        r"\b(?:at|around)\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b",
+        text
+    )
+
+    if time_match:
+        hour = int(time_match.group(1))
+        minute = int(time_match.group(2) or 0)
+        meridiem = time_match.group(3)
+
+        if meridiem == "pm" and hour < 12:
+            hour += 12
+        elif meridiem == "am" and hour == 12:
+            hour = 0
+
+        if 0 <= hour <= 23 and 0 <= minute <= 59:
             return callback_date.replace(
-                hour=10,
-                minute=0,
+                hour=hour,
+                minute=minute,
                 second=0,
                 microsecond=0
             )
 
-        if "afternoon" in text:
-            return callback_date.replace(
-                hour=14,
-                minute=0,
-                second=0,
-                microsecond=0
-            )
-
-        if "evening" in text:
-            return callback_date.replace(
-                hour=18,
-                minute=0,
-                second=0,
-                microsecond=0
-            )
-
+    # Time of day
+    if "morning" in text:
         return callback_date.replace(
             hour=10,
             minute=0,
@@ -309,15 +318,29 @@ def extract_callback_time(message: str):
             microsecond=0
         )
 
-    if "today" in text:
-        if "evening" in text:
-            return now.replace(
-                hour=18,
-                minute=0,
-                second=0,
-                microsecond=0
-            )
+    if "afternoon" in text:
+        return callback_date.replace(
+            hour=14,
+            minute=0,
+            second=0,
+            microsecond=0
+        )
 
-        return now + timedelta(hours=1)
+    if "evening" in text:
+        return callback_date.replace(
+            hour=18,
+            minute=0,
+            second=0,
+            microsecond=0
+        )
 
-    return None
+    # Default
+    if "tomorrow" in text:
+        return callback_date.replace(
+            hour=10,
+            minute=0,
+            second=0,
+            microsecond=0
+        )
+
+    return now + timedelta(hours=1)
