@@ -405,7 +405,8 @@ def handle_call_result(
         "completed_at": queue_item.completed_at,
         "retry": False
     }
-    
+
+
 # =====================================================
 # SCHEDULE CALLBACK
 # =====================================================
@@ -453,15 +454,18 @@ def schedule_callback(
         "queue_status": queue_item.status,
         "message": "Callback scheduled successfully"
     }
-    
+
+
 # =====================================================
 # PROCESS DUE CALLBACKS
 # =====================================================
 
 def process_due_callbacks(db: Session):
     """
-    Find scheduled callbacks whose callback time has arrived
-    and move them back into the normal dialing queue.
+    Find scheduled callbacks whose callback time has arrived.
+
+    Due callbacks are moved into the normal dialing queue
+    and immediately processed into a new call attempt.
     """
 
     now = datetime.utcnow()
@@ -478,17 +482,38 @@ def process_due_callbacks(db: Session):
     processed_callbacks = []
 
     for queue_item in due_callbacks:
+
+        # -------------------------------------------------
+        # Move callback back to normal dialing queue
+        # -------------------------------------------------
+
         queue_item.status = "queued"
         queue_item.callback_status = "ready"
+
+        db.commit()
+
+        # -------------------------------------------------
+        # Automatically create a new call attempt
+        # -------------------------------------------------
+
+        call_result = process_specific_call(
+            queue_id=queue_item.id,
+            db=db
+        )
 
         processed_callbacks.append({
             "queue_id": queue_item.id,
             "callback_at": queue_item.callback_at,
             "callback_status": queue_item.callback_status,
-            "queue_status": queue_item.status
+            "queue_status": call_result.get(
+                "queue_status",
+                queue_item.status
+            ),
+            "attempt_id": call_result.get("attempt_id"),
+            "attempt_number": call_result.get("attempt_number"),
+            "attempt_status": call_result.get("attempt_status"),
+            "success": call_result.get("success", False)
         })
-
-    db.commit()
 
     return {
         "success": True,
