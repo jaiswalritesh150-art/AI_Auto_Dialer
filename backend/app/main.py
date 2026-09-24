@@ -894,3 +894,64 @@ def ai_call_message(
             "analyzed_at": intelligence.analyzed_at
         }
     }
+
+@app.post("/api/v1/telephony/ai-call/{queue_id}/end")
+def end_ai_call(
+    queue_id: int,
+    db: Session = Depends(get_db)
+):
+    queue_item = (
+        db.query(CallQueue)
+        .filter(CallQueue.id == queue_id)
+        .first()
+    )
+
+    if not queue_item:
+        raise HTTPException(
+            status_code=404,
+            detail="Call queue item not found"
+        )
+
+    attempt = (
+        db.query(CallAttempt)
+        .filter(CallAttempt.queue_id == queue_id)
+        .order_by(CallAttempt.attempt_number.desc())
+        .first()
+    )
+
+    if not attempt:
+        raise HTTPException(
+            status_code=400,
+            detail="No call attempt found"
+        )
+
+    now = datetime.utcnow()
+
+    attempt.status = "completed"
+    attempt.result = "answered"
+    attempt.ended_at = now
+    attempt.failure_reason = None
+
+    queue_item.status = "completed"
+    queue_item.completed_at = now
+    queue_item.failure_reason = None
+
+    db.commit()
+
+    db.refresh(attempt)
+    db.refresh(queue_item)
+
+    return {
+        "status": "success",
+        "message": "AI call ended successfully",
+        "call": {
+            "queue_id": queue_item.id,
+            "attempt_id": attempt.id,
+            "attempt_number": attempt.attempt_number,
+            "attempt_status": attempt.status,
+            "call_result": attempt.result,
+            "queue_status": queue_item.status,
+            "ended_at": attempt.ended_at,
+            "completed_at": queue_item.completed_at
+        }
+    }
