@@ -69,3 +69,21 @@ class CallAttempt(Base):
     result = Column(String(100), nullable=True)
 
     failure_reason = Column(String(500), nullable=True)
+    
+class CallIntelligence(Base):
+    __tablename__ = "call_intelligence"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    queue_id = Column(Integer, nullable=False)
+    attempt_id = Column(Integer, nullable=False)
+
+    transcript = Column(String(10000), nullable=True)
+
+    summary = Column(String(2000), nullable=True)
+
+    sentiment = Column(String(50), nullable=True)
+
+    outcome = Column(String(100), nullable=True)
+
+    analyzed_at = Column(DateTime, default=datetime.utcnow)
