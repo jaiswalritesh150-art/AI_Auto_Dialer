@@ -35,7 +35,11 @@ from app.schemas.intelligence import (
 # =====================================================
 
 from app.ai.analyzer import analyze_call_transcript
-from app.telephony.ai_agent import generate_response
+
+from app.telephony.ai_agent import (
+    generate_response,
+    detect_call_decision
+)
 
 # =====================================================
 # VALIDATION / SCORING
@@ -72,16 +76,7 @@ from app.telephony.service import (
 from app.crm.service import update_lead_after_call
 
 
-# =====================================================
-# DATABASE TABLE CREATION
-# =====================================================
-
 Base.metadata.create_all(bind=engine)
-
-
-# =====================================================
-# FASTAPI APP
-# =====================================================
 
 app = FastAPI(
     title="AI Auto Dialer API",
@@ -101,10 +96,6 @@ def root():
         "message": "AI Auto Dialer Backend is running"
     }
 
-
-# =====================================================
-# HEALTH
-# =====================================================
 
 @app.get("/health")
 def health():
@@ -829,13 +820,16 @@ def ai_call(
 # =====================================================
 # AI CALL MESSAGE
 # =====================================================
-
 @app.post("/api/v1/telephony/ai-call/{queue_id}/message")
 def ai_call_message(
     queue_id: int,
     request: AIConversationRequest,
     db: Session = Depends(get_db)
 ):
+
+    # =================================================
+    # FIND QUEUE
+    # =================================================
 
     queue_item = (
         db.query(CallQueue)
@@ -848,6 +842,10 @@ def ai_call_message(
             status_code=404,
             detail="Call queue item not found"
         )
+
+    # =================================================
+    # FIND LEAD
+    # =================================================
 
     lead = (
         db.query(Lead)
@@ -862,6 +860,10 @@ def ai_call_message(
             status_code=404,
             detail="Lead not found"
         )
+
+    # =================================================
+    # FIND LATEST ATTEMPT
+    # =================================================
 
     attempt = (
         db.query(CallAttempt)
@@ -878,12 +880,20 @@ def ai_call_message(
             detail="No call attempt found"
         )
 
+    # =================================================
+    # CONVERSATION
+    # =================================================
+
     conversation = list(request.conversation)
 
     conversation.append({
         "role": "user",
         "text": request.message
     })
+
+    # =================================================
+    # LEAD CONTEXT
+    # =================================================
 
     lead_context = {
         "first_name": lead.first_name,
@@ -921,6 +931,29 @@ def ai_call_message(
     })
 
     # =================================================
+    # DETECT CALL DECISION
+    # =================================================
+
+    try:
+
+        decision = detect_call_decision(
+            conversation=conversation,
+            lead_context=lead_context
+        )
+
+    except Exception as exc:
+
+        raise HTTPException(
+            status_code=500,
+            detail=f"Call decision detection failed: {str(exc)}"
+        )
+
+    decision_type = decision.get(
+        "decision",
+        "continue"
+    )
+
+    # =================================================
     # BUILD TRANSCRIPT
     # =================================================
 
@@ -928,7 +961,10 @@ def ai_call_message(
 
     for message in conversation:
 
-        role = message.get("role", "user")
+        role = message.get(
+            "role",
+            "user"
+        )
 
         if role == "user":
             speaker = "Lead"
@@ -939,7 +975,9 @@ def ai_call_message(
             f"{speaker}: {message.get('text', '')}"
         )
 
-    transcript = "\n".join(transcript_lines)
+    transcript = "\n".join(
+        transcript_lines
+    )
 
     # =================================================
     # ANALYZE CONVERSATION
@@ -976,22 +1014,99 @@ def ai_call_message(
     db.refresh(intelligence)
 
     # =================================================
+    # AUTOMATIC CALL CONTROL
+    # =================================================
+
+    terminal_decisions = {
+        "callback_requested",
+        "not_interested",
+        "converted",
+        "no_further_contact"
+    }
+
+    call_ended = False
+
+    if decision_type in terminal_decisions:
+
+        now = datetime.utcnow()
+
+        attempt.status = "completed"
+
+        attempt.result = (
+            decision_type
+        )
+
+        attempt.ended_at = now
+
+        attempt.failure_reason = None
+
+        queue_item.status = "completed"
+
+        queue_item.completed_at = now
+
+        queue_item.failure_reason = None
+
+        # =================================================
+        # UPDATE CRM
+        # =================================================
+
+        crm_result = update_lead_after_call(
+            zoho_lead_id=lead.zoho_lead_id,
+            outcome=decision_type,
+            sentiment=analysis.get(
+                "sentiment"
+            ) or "neutral",
+            summary=analysis.get(
+                "summary"
+            ) or ""
+        )
+
+        db.commit()
+
+        db.refresh(attempt)
+        db.refresh(queue_item)
+
+        call_ended = True
+
+    else:
+
+        crm_result = None
+
+    # =================================================
     # RESPONSE
     # =================================================
 
     return {
         "status": "success",
-        "message": "AI response and call intelligence saved successfully",
+
+        "message": (
+            "AI response, call intelligence and "
+            "decision saved successfully"
+        ),
+
         "call": {
             "queue_id": queue_id,
             "attempt_id": attempt.id,
             "attempt_number": attempt.attempt_number,
             "phone": queue_item.phone,
-            "lead_name": f"{lead.first_name} {lead.last_name}",
+            "lead_name": (
+                f"{lead.first_name} "
+                f"{lead.last_name}"
+            ),
             "user_message": request.message,
             "ai_response": ai_response,
-            "conversation": conversation
+            "conversation": conversation,
+            "call_ended": call_ended
         },
+
+        "decision": {
+            "decision": decision_type,
+            "reason": decision.get(
+                "reason",
+                ""
+            )
+        },
+
         "intelligence": {
             "id": intelligence.id,
             "transcript": intelligence.transcript,
@@ -999,9 +1114,10 @@ def ai_call_message(
             "sentiment": intelligence.sentiment,
             "outcome": intelligence.outcome,
             "analyzed_at": intelligence.analyzed_at
-        }
-    }
+        },
 
+        "crm": crm_result
+    }
 
 # =====================================================
 # END AI CALL + CRM UPDATE
@@ -1149,3 +1265,4 @@ def end_ai_call(
 
         "crm": crm_result
     }
+

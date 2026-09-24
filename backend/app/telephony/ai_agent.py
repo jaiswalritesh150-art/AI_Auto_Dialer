@@ -138,3 +138,117 @@ Do not expose internal lead information unnecessarily.
         raise last_error
 
     return "I'm sorry, could you please repeat that?"
+
+def detect_call_decision(
+    conversation: list[dict],
+    lead_context: dict | None = None
+) -> dict:
+
+    context_text = ""
+
+    if lead_context:
+        context_text = f"""
+LEAD INFORMATION:
+
+Name: {lead_context.get("first_name", "")} {lead_context.get("last_name", "")}
+Company: {lead_context.get("company", "")}
+Lead Source: {lead_context.get("lead_source", "")}
+Lead Status: {lead_context.get("lead_status", "")}
+"""
+
+    transcript = ""
+
+    for message in conversation:
+        role = message.get("role", "user")
+        text = message.get("text", "")
+
+        if role == "assistant":
+            role = "AI Agent"
+        elif role == "model":
+            role = "AI Agent"
+        else:
+            role = "Lead"
+
+        transcript += f"{role}: {text}\n"
+
+    prompt = f"""
+You are a call decision engine for an AI sales calling system.
+
+{context_text}
+
+Conversation:
+{transcript}
+
+Analyze the conversation and return ONLY valid JSON:
+
+{{
+    "decision": "continue | callback_requested | not_interested | converted | no_further_contact",
+    "reason": "Short reason for the decision"
+}}
+
+Rules:
+- Use "continue" if the conversation should continue.
+- Use "callback_requested" if the lead asks for a callback or representative contact.
+- Use "not_interested" if the lead clearly rejects the offer.
+- Use "converted" if the lead clearly agrees to proceed or buy.
+- Use "no_further_contact" if the lead explicitly asks not to be contacted again.
+- Do not guess.
+- Do not add markdown.
+- Do not add explanations outside JSON.
+"""
+
+    models = [
+        "gemini-3.5-flash",
+        "gemini-3.5-flash-lite",
+        "gemini-flash-latest"
+    ]
+
+    last_error = None
+
+    for model_name in models:
+
+        for attempt in range(2):
+
+            try:
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=prompt
+                )
+
+                if not response or not response.text:
+                    raise ValueError(
+                        "Gemini returned an empty response"
+                    )
+
+                text = response.text.strip()
+
+                if text.startswith("```"):
+                    text = (
+                        text.replace("```json", "")
+                        .replace("```", "")
+                        .strip()
+                    )
+
+                import json
+
+                result = json.loads(text)
+
+                return {
+                    "decision": result.get("decision", "continue"),
+                    "reason": result.get("reason", "")
+                }
+
+            except Exception as exc:
+
+                last_error = exc
+
+                if attempt == 0:
+                    time.sleep(2)
+
+    if last_error:
+        raise last_error
+
+    return {
+        "decision": "continue",
+        "reason": "Unable to determine call decision"
+    }
