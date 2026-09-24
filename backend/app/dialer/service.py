@@ -453,3 +453,45 @@ def schedule_callback(
         "queue_status": queue_item.status,
         "message": "Callback scheduled successfully"
     }
+    
+# =====================================================
+# PROCESS DUE CALLBACKS
+# =====================================================
+
+def process_due_callbacks(db: Session):
+    """
+    Find scheduled callbacks whose callback time has arrived
+    and move them back into the normal dialing queue.
+    """
+
+    now = datetime.utcnow()
+
+    due_callbacks = (
+        db.query(CallQueue)
+        .filter(
+            CallQueue.status == "callback_scheduled",
+            CallQueue.callback_at <= now
+        )
+        .all()
+    )
+
+    processed_callbacks = []
+
+    for queue_item in due_callbacks:
+        queue_item.status = "queued"
+        queue_item.callback_status = "ready"
+
+        processed_callbacks.append({
+            "queue_id": queue_item.id,
+            "callback_at": queue_item.callback_at,
+            "callback_status": queue_item.callback_status,
+            "queue_status": queue_item.status
+        })
+
+    db.commit()
+
+    return {
+        "success": True,
+        "processed_count": len(processed_callbacks),
+        "callbacks": processed_callbacks
+    }
