@@ -252,3 +252,72 @@ Rules:
         "decision": "continue",
         "reason": "Unable to determine call decision"
     }
+    
+# =====================================================
+# CALLBACK TIME EXTRACTION
+# =====================================================
+
+from datetime import datetime, timedelta
+
+
+def extract_callback_time(message: str):
+    """
+    Extract a basic callback time from the user's message.
+
+    Supports common phrases such as:
+    - tomorrow
+    - today
+    - tomorrow morning
+    - tomorrow afternoon
+    - tomorrow evening
+    """
+
+    text = message.lower()
+    now = datetime.utcnow()
+
+    if "tomorrow" in text:
+        callback_date = now + timedelta(days=1)
+
+        if "morning" in text:
+            return callback_date.replace(
+                hour=10,
+                minute=0,
+                second=0,
+                microsecond=0
+            )
+
+        if "afternoon" in text:
+            return callback_date.replace(
+                hour=14,
+                minute=0,
+                second=0,
+                microsecond=0
+            )
+
+        if "evening" in text:
+            return callback_date.replace(
+                hour=18,
+                minute=0,
+                second=0,
+                microsecond=0
+            )
+
+        return callback_date.replace(
+            hour=10,
+            minute=0,
+            second=0,
+            microsecond=0
+        )
+
+    if "today" in text:
+        if "evening" in text:
+            return now.replace(
+                hour=18,
+                minute=0,
+                second=0,
+                microsecond=0
+            )
+
+        return now + timedelta(hours=1)
+
+    return None
