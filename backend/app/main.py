@@ -144,7 +144,6 @@ def get_leads(
         ]
     }
 
-
 # =====================================================
 # GET CALL QUEUE
 # =====================================================
@@ -172,7 +171,11 @@ def get_call_queue(
                 "queued_at": item.queued_at,
                 "started_at": item.started_at,
                 "completed_at": item.completed_at,
-                "failure_reason": item.failure_reason
+                "failure_reason": item.failure_reason,
+
+                # Callback information
+                "callback_at": item.callback_at,
+                "callback_status": item.callback_status
             }
             for item in queue_items
         ]
