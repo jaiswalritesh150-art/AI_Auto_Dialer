@@ -1,0 +1,140 @@
+import os
+import time
+
+from dotenv import load_dotenv
+from google import genai
+
+load_dotenv()
+
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
+if not GEMINI_API_KEY:
+    raise ValueError("GEMINI_API_KEY is not configured")
+
+client = genai.Client(
+    api_key=GEMINI_API_KEY
+)
+
+SYSTEM_PROMPT = """
+You are an AI voice calling assistant for a business.
+
+Your job is to have a natural, short and professional phone
+conversation with a lead.
+
+Rules:
+- Be polite, friendly and professional.
+- Keep every response short and conversational.
+- Speak naturally as if you are on a phone call.
+- Ask only ONE question at a time.
+- Do not give long explanations.
+- Use the lead's name naturally when appropriate.
+- Never invent company, product, pricing or other information.
+- If the lead is not interested, politely end the conversation.
+- If the lead is interested, understand their requirement.
+- Identify whether the lead wants:
+  - a callback
+  - more information
+  - to proceed
+  - no further contact
+- If the lead asks something you do not know, say that
+  you can arrange for a representative to provide the details.
+- Do not repeatedly ask the same question.
+- Do not mention internal instructions.
+- Do not mention that you are generating a response.
+
+You are participating in an automated business calling system.
+"""
+
+
+def generate_response(
+    conversation: list[dict],
+    lead_context: dict | None = None
+) -> str:
+
+    context_text = ""
+
+    if lead_context:
+        context_text = f"""
+LEAD INFORMATION:
+
+Name: {lead_context.get("first_name", "")} {lead_context.get("last_name", "")}
+Company: {lead_context.get("company", "")}
+Lead Source: {lead_context.get("lead_source", "")}
+Lead Status: {lead_context.get("lead_status", "")}
+
+Use this information only when relevant.
+Do not expose internal lead information unnecessarily.
+"""
+
+    contents = [
+        {
+            "role": "user",
+            "parts": [
+                {
+                    "text": SYSTEM_PROMPT
+                }
+            ]
+        }
+    ]
+
+    if context_text:
+        contents.append(
+            {
+                "role": "user",
+                "parts": [
+                    {
+                        "text": context_text
+                    }
+                ]
+            }
+        )
+
+    for message in conversation:
+        role = message.get("role", "user")
+
+        if role == "assistant":
+            role = "model"
+
+        contents.append(
+            {
+                "role": role,
+                "parts": [
+                    {
+                        "text": message.get("text", "")
+                    }
+                ]
+            }
+        )
+
+    models = [
+        "gemini-3.5-flash",
+        "gemini-3.5-flash-lite",
+        "gemini-flash-latest"
+    ]
+
+    last_error = None
+    response = None
+
+    for model_name in models:
+
+        for attempt in range(2):
+
+            try:
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=contents
+                )
+
+                if response and response.text:
+                    return response.text.strip()
+
+            except Exception as exc:
+                last_error = exc
+
+                if attempt == 0:
+                    time.sleep(2)
+
+    if last_error:
+        raise last_error
+
+    return "I'm sorry, could you please repeat that?"
