@@ -36,20 +36,17 @@ class CallQueue(Base):
     __tablename__ = "call_queue"
 
     id = Column(Integer, primary_key=True, index=True)
-
     lead_id = Column(Integer, nullable=False)
-
     phone = Column(String(30), nullable=True)
-
     status = Column(String(50), default="queued", nullable=False)
-
     queued_at = Column(DateTime, default=datetime.utcnow)
-
     started_at = Column(DateTime, nullable=True)
-
     completed_at = Column(DateTime, nullable=True)
-
     failure_reason = Column(String(500), nullable=True)
+
+    callback_at = Column(DateTime, nullable=True)
+    callback_status = Column(String(50), nullable=True)
+    
     
 class CallAttempt(Base):
     __tablename__ = "call_attempts"

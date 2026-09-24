@@ -405,3 +405,51 @@ def handle_call_result(
         "completed_at": queue_item.completed_at,
         "retry": False
     }
+    
+# =====================================================
+# SCHEDULE CALLBACK
+# =====================================================
+
+def schedule_callback(
+    queue_id: int,
+    callback_at: datetime,
+    db: Session
+):
+    """
+    Schedule a callback for an existing call queue item.
+    """
+
+    # Find queue item
+    queue_item = (
+        db.query(CallQueue)
+        .filter(CallQueue.id == queue_id)
+        .first()
+    )
+
+    if not queue_item:
+        return {
+            "success": False,
+            "message": "Call queue item not found"
+        }
+
+    # Save callback details
+    queue_item.callback_at = callback_at
+    queue_item.callback_status = "scheduled"
+
+    # Update queue status
+    queue_item.status = "callback_scheduled"
+
+    queue_item.completed_at = None
+    queue_item.failure_reason = None
+
+    db.commit()
+    db.refresh(queue_item)
+
+    return {
+        "success": True,
+        "queue_id": queue_item.id,
+        "callback_at": queue_item.callback_at,
+        "callback_status": queue_item.callback_status,
+        "queue_status": queue_item.status,
+        "message": "Callback scheduled successfully"
+    }

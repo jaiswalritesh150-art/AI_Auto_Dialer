@@ -29,6 +29,7 @@ from app.schemas.intelligence import (
     CallIntelligenceRequest,
     AIConversationRequest
 )
+from app.schemas.callback import CallbackRequest
 
 # =====================================================
 # AI
@@ -51,14 +52,13 @@ from app.dialer.scoring import calculate_lead_score
 # =====================================================
 # DIALER
 # =====================================================
-
 from app.dialer.service import (
     queue_lead,
     process_next_call,
     process_specific_call,
-    handle_call_result
+    handle_call_result,
+    schedule_callback
 )
-
 # =====================================================
 # TELEPHONY
 # =====================================================
@@ -1266,3 +1266,20 @@ def end_ai_call(
         "crm": crm_result
     }
 
+# =====================================================
+# SCHEDULE CALLBACK
+# =====================================================
+
+@app.post("/api/v1/dialer/callback/{queue_id}")
+def schedule_callback_endpoint(
+    queue_id: int,
+    request: CallbackRequest,
+    db: Session = Depends(get_db)
+):
+    result = schedule_callback(
+        queue_id=queue_id,
+        callback_at=request.callback_at,
+        db=db
+    )
+
+    return result
