@@ -57,7 +57,8 @@ from app.dialer.service import (
     process_next_call,
     process_specific_call,
     handle_call_result,
-    schedule_callback
+    schedule_callback,
+    process_due_callbacks
 )
 # =====================================================
 # TELEPHONY
@@ -1265,6 +1266,17 @@ def end_ai_call(
 
         "crm": crm_result
     }
+
+# =====================================================
+# PROCESS DUE CALLBACKS
+# =====================================================
+
+@app.post("/api/v1/dialer/callback/process-due")
+def process_due_callbacks_endpoint(
+    db: Session = Depends(get_db)
+):
+    return process_due_callbacks(db)
+
 
 # =====================================================
 # SCHEDULE CALLBACK
