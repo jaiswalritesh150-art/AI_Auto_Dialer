@@ -1,13 +1,13 @@
 from fastapi import FastAPI, Depends, HTTPException
+from contextlib import asynccontextmanager
+import asyncio
 from datetime import datetime
 from sqlalchemy.orm import Session
 
 # =====================================================
 # DATABASE
 # =====================================================
-
-from app.database import Base, engine, get_db
-
+from app.database import Base, engine, get_db, SessionLocal
 # =====================================================
 # MODELS
 # =====================================================
@@ -78,14 +78,55 @@ from app.telephony.service import (
 from app.crm.service import update_lead_after_call
 
 
+async def callback_worker():
+    while True:
+        db = SessionLocal()
+
+        try:
+            result = process_due_callbacks(db)
+
+            if result.get("processed_count", 0) > 0:
+                print(
+                    f"Callback worker processed "
+                    f"{result['processed_count']} due callback(s)"
+                )
+
+        except Exception as e:
+            print(f"Callback worker error: {e}")
+
+        finally:
+            db.close()
+
+        await asyncio.sleep(30)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    worker_task = asyncio.create_task(callback_worker())
+
+    print("Callback worker started")
+
+    try:
+        yield
+    finally:
+        worker_task.cancel()
+
+        try:
+            await worker_task
+        except asyncio.CancelledError:
+            pass
+
+        print("Callback worker stopped")
+
+
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
     title="AI Auto Dialer API",
     description="Zoho CRM Webhook Backend",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
-
 
 # =====================================================
 # ROOT
