@@ -47,7 +47,6 @@ class CallQueue(Base):
     callback_at = Column(DateTime, nullable=True)
     callback_status = Column(String(50), nullable=True)
     
-    
 class CallAttempt(Base):
     __tablename__ = "call_attempts"
 
@@ -59,14 +58,18 @@ class CallAttempt(Base):
 
     status = Column(String(50), default="started", nullable=False)
 
+    # Telephony provider information
+    provider = Column(String(50), nullable=True)
+    provider_call_id = Column(String(100), nullable=True)
+
     started_at = Column(DateTime, default=datetime.utcnow)
 
     ended_at = Column(DateTime, nullable=True)
 
     result = Column(String(100), nullable=True)
 
-    failure_reason = Column(String(500), nullable=True)
-    
+    failure_reason = Column(String(500), nullable=True)    
+
 class CallIntelligence(Base):
     __tablename__ = "call_intelligence"
 
