@@ -543,7 +543,7 @@ def process_due_callbacks(db: Session):
     Find scheduled callbacks whose callback time has arrived.
 
     Due callbacks are moved into the normal dialing queue
-    and immediately processed into a new call attempt.
+    and automatically processed into a new call attempt.
     """
 
     now = datetime.utcnow()
@@ -562,11 +562,11 @@ def process_due_callbacks(db: Session):
     for queue_item in due_callbacks:
 
         # -------------------------------------------------
-        # Move callback back to normal dialing queue
+        # Mark callback as being processed
         # -------------------------------------------------
 
         queue_item.status = "queued"
-        queue_item.callback_status = "ready"
+        queue_item.callback_status = "processing"
 
         db.commit()
 
@@ -578,6 +578,29 @@ def process_due_callbacks(db: Session):
             queue_id=queue_item.id,
             db=db
         )
+
+        # -------------------------------------------------
+        # Callback was successfully consumed
+        # -------------------------------------------------
+
+        if call_result.get("success"):
+
+            queue_item.callback_at = None
+            queue_item.callback_status = "completed"
+
+            db.commit()
+            db.refresh(queue_item)
+
+        else:
+
+            # -------------------------------------------------
+            # Callback processing failed
+            # -------------------------------------------------
+
+            queue_item.callback_status = "failed"
+
+            db.commit()
+            db.refresh(queue_item)
 
         processed_callbacks.append({
             "queue_id": queue_item.id,
@@ -598,9 +621,3 @@ def process_due_callbacks(db: Session):
         "processed_count": len(processed_callbacks),
         "callbacks": processed_callbacks
     }
-
-
-
-
-
-
