@@ -250,7 +250,9 @@ def get_call_attempts(
                 "started_at": attempt.started_at,
                 "ended_at": attempt.ended_at,
                 "result": attempt.result,
-                "failure_reason": attempt.failure_reason
+                "failure_reason": attempt.failure_reason,
+                "provider": attempt.provider,
+                "provider_call_id": attempt.provider_call_id
             }
             for attempt in attempts
         ]
@@ -300,13 +302,13 @@ def get_queue_call_attempts(
                 "started_at": attempt.started_at,
                 "ended_at": attempt.ended_at,
                 "result": attempt.result,
-                "failure_reason": attempt.failure_reason
+                "failure_reason": attempt.failure_reason,
+                "provider": attempt.provider,
+                "provider_call_id": attempt.provider_call_id
             }
             for attempt in attempts
         ]
     }
-
-
 # =====================================================
 # PROCESS NEXT CALL
 # =====================================================
@@ -589,6 +591,19 @@ def initiate_telephony_call(
             status_code=400,
             detail=call.get("message")
         )
+
+    # Save telephony provider details
+    attempt.provider = call.get("provider")
+    attempt.provider_call_id = call.get("call_id")
+
+    db.commit()
+    db.refresh(attempt)
+
+    return {
+        "status": "success",
+        "message": "Telephony call initiated",
+        "call": call
+    }
 
     return {
         "status": "success",
