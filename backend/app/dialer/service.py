@@ -3,6 +3,7 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 
 from app.models import CallQueue, CallAttempt
+from app.telephony.service import initiate_call
 
 
 # =====================================================
@@ -102,6 +103,42 @@ def process_next_call(db: Session):
     db.commit()
     db.refresh(attempt)
 
+    # Initiate telephony call
+    call = initiate_call(
+        phone=queue_item.phone,
+        queue_id=queue_item.id,
+        attempt_id=attempt.id
+    )
+
+    if not call.get("success"):
+        attempt.status = "failed"
+        attempt.failure_reason = call.get("message")
+        attempt.ended_at = datetime.utcnow()
+
+        queue_item.status = "failed"
+        queue_item.completed_at = datetime.utcnow()
+        queue_item.failure_reason = call.get("message")
+
+        db.commit()
+
+        return {
+            "queue_id": queue_item.id,
+            "phone": queue_item.phone,
+            "queue_status": queue_item.status,
+            "attempt_id": attempt.id,
+            "attempt_number": attempt.attempt_number,
+            "attempt_status": attempt.status,
+            "failure_reason": attempt.failure_reason
+        }
+
+    # Save provider tracking information
+    attempt.provider = call.get("provider")
+    attempt.provider_call_id = call.get("call_id")
+    attempt.status = "initiated"
+
+    db.commit()
+    db.refresh(attempt)
+
     return {
         "queue_id": queue_item.id,
         "phone": queue_item.phone,
@@ -109,6 +146,8 @@ def process_next_call(db: Session):
         "attempt_id": attempt.id,
         "attempt_number": attempt.attempt_number,
         "attempt_status": attempt.status,
+        "provider": attempt.provider,
+        "provider_call_id": attempt.provider_call_id,
         "started_at": attempt.started_at,
     }
 
@@ -195,6 +234,43 @@ def process_specific_call(
     db.commit()
     db.refresh(attempt)
 
+    # Initiate telephony call
+    call = initiate_call(
+        phone=queue_item.phone,
+        queue_id=queue_item.id,
+        attempt_id=attempt.id
+    )
+
+    if not call.get("success"):
+        attempt.status = "failed"
+        attempt.failure_reason = call.get("message")
+        attempt.ended_at = datetime.utcnow()
+
+        queue_item.status = "failed"
+        queue_item.completed_at = datetime.utcnow()
+        queue_item.failure_reason = call.get("message")
+
+        db.commit()
+
+        return {
+            "success": False,
+            "queue_id": queue_item.id,
+            "phone": queue_item.phone,
+            "queue_status": queue_item.status,
+            "attempt_id": attempt.id,
+            "attempt_number": attempt.attempt_number,
+            "attempt_status": attempt.status,
+            "failure_reason": attempt.failure_reason
+        }
+
+    # Save provider tracking information
+    attempt.provider = call.get("provider")
+    attempt.provider_call_id = call.get("call_id")
+    attempt.status = "initiated"
+
+    db.commit()
+    db.refresh(attempt)
+
     return {
         "success": True,
         "queue_id": queue_item.id,
@@ -203,6 +279,8 @@ def process_specific_call(
         "attempt_id": attempt.id,
         "attempt_number": attempt.attempt_number,
         "attempt_status": attempt.status,
+        "provider": attempt.provider,
+        "provider_call_id": attempt.provider_call_id,
         "started_at": attempt.started_at
     }
 
@@ -520,3 +598,9 @@ def process_due_callbacks(db: Session):
         "processed_count": len(processed_callbacks),
         "callbacks": processed_callbacks
     }
+
+
+
+
+
+

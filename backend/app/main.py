@@ -7,7 +7,9 @@ from sqlalchemy.orm import Session
 # =====================================================
 # DATABASE
 # =====================================================
+
 from app.database import Base, engine, get_db, SessionLocal
+
 # =====================================================
 # MODELS
 # =====================================================
@@ -53,6 +55,7 @@ from app.dialer.scoring import calculate_lead_score
 # =====================================================
 # DIALER
 # =====================================================
+
 from app.dialer.service import (
     queue_lead,
     process_next_call,
@@ -61,6 +64,7 @@ from app.dialer.service import (
     schedule_callback,
     process_due_callbacks
 )
+
 # =====================================================
 # TELEPHONY
 # =====================================================
@@ -78,48 +82,80 @@ from app.telephony.service import (
 from app.crm.service import update_lead_after_call
 
 
+# =====================================================
+# CALLBACK WORKER
+# =====================================================
+
 async def callback_worker():
+
     while True:
+
         db = SessionLocal()
 
         try:
+
             result = process_due_callbacks(db)
 
             if result.get("processed_count", 0) > 0:
+
                 print(
                     f"Callback worker processed "
                     f"{result['processed_count']} due callback(s)"
                 )
 
         except Exception as e:
+
             print(f"Callback worker error: {e}")
 
         finally:
+
             db.close()
 
         await asyncio.sleep(30)
 
 
+# =====================================================
+# APPLICATION LIFESPAN
+# =====================================================
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    worker_task = asyncio.create_task(callback_worker())
+
+    worker_task = asyncio.create_task(
+        callback_worker()
+    )
 
     print("Callback worker started")
 
     try:
+
         yield
+
     finally:
+
         worker_task.cancel()
 
         try:
+
             await worker_task
+
         except asyncio.CancelledError:
+
             pass
 
         print("Callback worker stopped")
 
 
+# =====================================================
+# DATABASE TABLE CREATION
+# =====================================================
+
 Base.metadata.create_all(bind=engine)
+
+
+# =====================================================
+# FASTAPI APPLICATION
+# =====================================================
 
 app = FastAPI(
     title="AI Auto Dialer API",
@@ -128,20 +164,27 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+
 # =====================================================
 # ROOT
 # =====================================================
 
 @app.get("/")
 def root():
+
     return {
         "status": "success",
         "message": "AI Auto Dialer Backend is running"
     }
 
 
+# =====================================================
+# HEALTH CHECK
+# =====================================================
+
 @app.get("/health")
 def health():
+
     return {
         "status": "healthy"
     }
@@ -185,6 +228,7 @@ def get_leads(
         ]
     }
 
+
 # =====================================================
 # GET CALL QUEUE
 # =====================================================
@@ -213,8 +257,6 @@ def get_call_queue(
                 "started_at": item.started_at,
                 "completed_at": item.completed_at,
                 "failure_reason": item.failure_reason,
-
-                # Callback information
                 "callback_at": item.callback_at,
                 "callback_status": item.callback_status
             }
@@ -276,6 +318,7 @@ def get_queue_call_attempts(
     )
 
     if not queue_item:
+
         raise HTTPException(
             status_code=404,
             detail="Call queue item not found"
@@ -283,8 +326,12 @@ def get_queue_call_attempts(
 
     attempts = (
         db.query(CallAttempt)
-        .filter(CallAttempt.queue_id == queue_id)
-        .order_by(CallAttempt.attempt_number.asc())
+        .filter(
+            CallAttempt.queue_id == queue_id
+        )
+        .order_by(
+            CallAttempt.attempt_number.asc()
+        )
         .all()
     )
 
@@ -309,6 +356,8 @@ def get_queue_call_attempts(
             for attempt in attempts
         ]
     }
+
+
 # =====================================================
 # PROCESS NEXT CALL
 # =====================================================
@@ -321,6 +370,7 @@ def process_next_dialer_call(
     result = process_next_call(db)
 
     if not result:
+
         return {
             "status": "success",
             "message": "No queued calls available"
@@ -349,6 +399,7 @@ def process_specific_dialer_call(
     )
 
     if result.get("success") is False:
+
         raise HTTPException(
             status_code=404,
             detail=result["message"]
@@ -384,7 +435,9 @@ async def zoho_lead_webhook(
     # STEP 1 — PHONE VALIDATION
     # =================================================
 
-    phone_validation = validate_phone(lead.phone)
+    phone_validation = validate_phone(
+        lead.phone
+    )
 
     if not phone_validation["valid"]:
 
@@ -404,7 +457,10 @@ async def zoho_lead_webhook(
 
     print("\n--- PHONE VALIDATION ---")
     print("Phone:", lead.phone)
-    print("Validation:", phone_validation["message"])
+    print(
+        "Validation:",
+        phone_validation["message"]
+    )
 
     # =================================================
     # STEP 2 — DUPLICATE CHECK
@@ -420,7 +476,9 @@ async def zoho_lead_webhook(
 
     if existing_lead:
 
-        print("\nLead already exists in PostgreSQL.")
+        print(
+            "\nLead already exists in PostgreSQL."
+        )
 
         return {
             "status": "success",
@@ -432,7 +490,9 @@ async def zoho_lead_webhook(
     # STEP 3 — LEAD SCORING
     # =================================================
 
-    lead_score, priority = calculate_lead_score(lead)
+    lead_score, priority = calculate_lead_score(
+        lead
+    )
 
     print("\n--- LEAD SCORING ---")
     print("Lead Score:", lead_score)
@@ -466,7 +526,9 @@ async def zoho_lead_webhook(
     print("\n--- POSTGRESQL ---")
     print("Lead saved successfully!")
     print(f"Database ID: {new_lead.id}")
-    print(f"Zoho Lead ID: {new_lead.zoho_lead_id}")
+    print(
+        f"Zoho Lead ID: {new_lead.zoho_lead_id}"
+    )
     print(f"Lead Score: {new_lead.lead_score}")
     print(f"Priority: {new_lead.priority}")
 
@@ -487,12 +549,17 @@ async def zoho_lead_webhook(
     # COMPLETE
     # =================================================
 
-    print("\n--- WEBHOOK PROCESSING COMPLETE ---")
+    print(
+        "\n--- WEBHOOK PROCESSING COMPLETE ---"
+    )
     print("=" * 60 + "\n")
 
     return {
         "status": "success",
-        "message": "Lead received, validated, scored, saved and queued for dialing",
+        "message": (
+            "Lead received, validated, scored, "
+            "saved and queued for dialing"
+        ),
         "database_id": new_lead.id,
         "zoho_lead_id": new_lead.zoho_lead_id,
         "lead_score": new_lead.lead_score,
@@ -521,7 +588,11 @@ def call_result(
         db=db
     )
 
-    if "success" in result and result["success"] is False:
+    if (
+        "success" in result
+        and result["success"] is False
+    ):
+
         raise HTTPException(
             status_code=404,
             detail=result["message"]
@@ -546,17 +617,21 @@ def initiate_telephony_call(
 
     queue_item = (
         db.query(CallQueue)
-        .filter(CallQueue.id == queue_id)
+        .filter(
+            CallQueue.id == queue_id
+        )
         .first()
     )
 
     if not queue_item:
+
         raise HTTPException(
             status_code=404,
             detail="Call queue item not found"
         )
 
     if queue_item.status != "calling":
+
         raise HTTPException(
             status_code=400,
             detail=(
@@ -570,15 +645,30 @@ def initiate_telephony_call(
         .filter(
             CallAttempt.queue_id == queue_id
         )
-        .order_by(CallAttempt.attempt_number.desc())
+        .order_by(
+            CallAttempt.attempt_number.desc()
+        )
         .first()
     )
 
     if not attempt:
+
         raise HTTPException(
             status_code=400,
             detail="No call attempt found for this queue"
         )
+
+    if attempt.provider_call_id:
+        return {
+            "success": True,
+            "queue_id": queue_item.id,
+            "attempt_id": attempt.id,
+            "attempt_number": attempt.attempt_number,
+            "provider": attempt.provider,
+            "provider_call_id": attempt.provider_call_id,
+            "status": attempt.status,
+            "message": "Call already initiated"
+        }
 
     call = initiate_call(
         phone=queue_item.phone,
@@ -587,23 +677,21 @@ def initiate_telephony_call(
     )
 
     if not call.get("success"):
+
         raise HTTPException(
             status_code=400,
             detail=call.get("message")
         )
 
     # Save telephony provider details
+
     attempt.provider = call.get("provider")
-    attempt.provider_call_id = call.get("call_id")
+    attempt.provider_call_id = call.get(
+        "call_id"
+    )
 
     db.commit()
     db.refresh(attempt)
-
-    return {
-        "status": "success",
-        "message": "Telephony call initiated",
-        "call": call
-    }
 
     return {
         "status": "success",
@@ -621,7 +709,9 @@ def telephony_call_status(
     call_id: str
 ):
 
-    return get_call_status(call_id)
+    return get_call_status(
+        call_id
+    )
 
 
 # =====================================================
@@ -633,7 +723,9 @@ def telephony_end_call(
     call_id: str
 ):
 
-    return end_call(call_id)
+    return end_call(
+        call_id
+    )
 
 
 # =====================================================
@@ -659,6 +751,7 @@ def create_call_intelligence(
     )
 
     if not queue_item:
+
         raise HTTPException(
             status_code=404,
             detail="Call queue item not found"
@@ -678,6 +771,7 @@ def create_call_intelligence(
     )
 
     if not attempt:
+
         raise HTTPException(
             status_code=404,
             detail="Call attempt not found"
@@ -723,7 +817,10 @@ def create_call_intelligence(
 
     return {
         "status": "success",
-        "message": "Call intelligence analyzed and saved successfully",
+        "message": (
+            "Call intelligence analyzed and "
+            "saved successfully"
+        ),
         "call_intelligence": {
             "id": intelligence.id,
             "queue_id": intelligence.queue_id,
@@ -753,11 +850,14 @@ def ai_call(
 
     queue_item = (
         db.query(CallQueue)
-        .filter(CallQueue.id == queue_id)
+        .filter(
+            CallQueue.id == queue_id
+        )
         .first()
     )
 
     if not queue_item:
+
         raise HTTPException(
             status_code=404,
             detail="Call queue item not found"
@@ -776,6 +876,7 @@ def ai_call(
     )
 
     if not lead:
+
         raise HTTPException(
             status_code=404,
             detail="Lead not found"
@@ -790,11 +891,14 @@ def ai_call(
         .filter(
             CallAttempt.queue_id == queue_id
         )
-        .order_by(CallAttempt.attempt_number.desc())
+        .order_by(
+            CallAttempt.attempt_number.desc()
+        )
         .first()
     )
 
     if not attempt:
+
         raise HTTPException(
             status_code=400,
             detail="No call attempt found"
@@ -804,18 +908,40 @@ def ai_call(
     # INITIATE SIMULATED CALL
     # =================================================
 
-    call = initiate_call(
-        phone=queue_item.phone,
-        queue_id=queue_item.id,
-        attempt_id=attempt.id
-    )
+    if attempt.provider_call_id:
 
-    if not call.get("success"):
-        raise HTTPException(
-            status_code=400,
-            detail=call.get("message")
+        call = {
+            "success": True,
+            "provider": attempt.provider,
+            "call_id": attempt.provider_call_id,
+            "queue_id": queue_item.id,
+            "attempt_id": attempt.id,
+            "phone": queue_item.phone,
+            "status": attempt.status,
+            "message": "Existing call reused"
+        }
+
+    else:
+
+        call = initiate_call(
+            phone=queue_item.phone,
+            queue_id=queue_item.id,
+            attempt_id=attempt.id
         )
 
+        if not call.get("success"):
+
+            raise HTTPException(
+                status_code=400,
+                detail=call.get("message")
+            )
+
+        attempt.provider = call.get("provider")
+        attempt.provider_call_id = call.get("call_id")
+
+        db.commit()
+        db.refresh(attempt)
+         
     # =================================================
     # LEAD CONTEXT
     # =================================================
@@ -836,10 +962,11 @@ def ai_call(
         {
             "role": "user",
             "text": (
-                "Start a natural phone conversation with the lead. "
-                "Give a short professional greeting. "
-                "Use the lead's name naturally. "
-                "Do not mention the phone number."
+                "Start a natural phone conversation "
+                "with the lead. Give a short "
+                "professional greeting. Use the "
+                "lead's name naturally. Do not "
+                "mention the phone number."
             )
         }
     ]
@@ -871,7 +998,10 @@ def ai_call(
             "attempt_id": attempt.id,
             "attempt_number": attempt.attempt_number,
             "phone": queue_item.phone,
-            "lead_name": f"{lead.first_name} {lead.last_name}",
+            "lead_name": (
+                f"{lead.first_name} "
+                f"{lead.last_name}"
+            ),
             "status": "ai_calling",
             "ai_response": ai_response
         }
@@ -881,6 +1011,7 @@ def ai_call(
 # =====================================================
 # AI CALL MESSAGE
 # =====================================================
+
 @app.post("/api/v1/telephony/ai-call/{queue_id}/message")
 def ai_call_message(
     queue_id: int,
@@ -894,11 +1025,14 @@ def ai_call_message(
 
     queue_item = (
         db.query(CallQueue)
-        .filter(CallQueue.id == queue_id)
+        .filter(
+            CallQueue.id == queue_id
+        )
         .first()
     )
 
     if not queue_item:
+
         raise HTTPException(
             status_code=404,
             detail="Call queue item not found"
@@ -917,6 +1051,7 @@ def ai_call_message(
     )
 
     if not lead:
+
         raise HTTPException(
             status_code=404,
             detail="Lead not found"
@@ -931,11 +1066,14 @@ def ai_call_message(
         .filter(
             CallAttempt.queue_id == queue_id
         )
-        .order_by(CallAttempt.attempt_number.desc())
+        .order_by(
+            CallAttempt.attempt_number.desc()
+        )
         .first()
     )
 
     if not attempt:
+
         raise HTTPException(
             status_code=400,
             detail="No call attempt found"
@@ -944,8 +1082,50 @@ def ai_call_message(
     # =================================================
     # CONVERSATION
     # =================================================
+    conversation = list(
+        request.conversation
+    )
+    # Load previous conversation from latest intelligence
+    previous_intelligence = (
+        db.query(CallIntelligence)
+        .filter(
+            CallIntelligence.queue_id == queue_id,
+            CallIntelligence.attempt_id == attempt.id
+        )
+        .order_by(
+            CallIntelligence.id.desc()
+        )
+        .first()
+    )
+    if previous_intelligence and previous_intelligence.transcript:
 
-    conversation = list(request.conversation)
+        previous_lines = previous_intelligence.transcript.split("\n")
+
+        conversation = []
+
+        for line in previous_lines:
+
+            if line.startswith("Lead: "):
+
+                conversation.append({
+                    "role": "user",
+                    "text": line.replace(
+                        "Lead: ",
+                        "",
+                        1
+                    )
+                })
+
+            elif line.startswith("AI Agent: "):
+
+                conversation.append({
+                    "role": "model",
+                    "text": line.replace(
+                        "AI Agent: ",
+                        "",
+                        1
+                    )
+                })
 
     conversation.append({
         "role": "user",
@@ -1006,7 +1186,10 @@ def ai_call_message(
 
         raise HTTPException(
             status_code=500,
-            detail=f"Call decision detection failed: {str(exc)}"
+            detail=(
+                "Call decision detection failed: "
+                f"{str(exc)}"
+            )
         )
 
     decision_type = decision.get(
@@ -1028,12 +1211,16 @@ def ai_call_message(
         )
 
         if role == "user":
+
             speaker = "Lead"
+
         else:
+
             speaker = "AI Agent"
 
         transcript_lines.append(
-            f"{speaker}: {message.get('text', '')}"
+            f"{speaker}: "
+            f"{message.get('text', '')}"
         )
 
     transcript = "\n".join(
@@ -1054,7 +1241,10 @@ def ai_call_message(
 
         raise HTTPException(
             status_code=500,
-            detail=f"Call intelligence analysis failed: {str(exc)}"
+            detail=(
+                "Call intelligence analysis failed: "
+                f"{str(exc)}"
+            )
         )
 
     # =================================================
@@ -1085,37 +1275,48 @@ def ai_call_message(
         "no_further_contact"
     }
 
-    # =====================================================
+    # =================================================
     # AUTOMATIC CALLBACK SCHEDULING
-    # =====================================================
+    # =================================================
 
     callback_scheduled = False
     callback_at = None
 
     if decision_type == "callback_requested":
-        callback_at = extract_callback_time(request.message)
+
+        callback_at = extract_callback_time(
+            request.message
+        )
 
         if callback_at:
+
             callback_result = schedule_callback(
                 queue_id=queue_id,
                 callback_at=callback_at,
                 db=db
             )
 
-            callback_scheduled = callback_result.get("success", False)
-        
-    
+            callback_scheduled = callback_result.get(
+                "success",
+                False
+            )
+
+    # =================================================
+    # CALL END CONTROL
+    # =================================================
+
     call_ended = False
 
-    if decision_type in terminal_decisions and decision_type != "callback_requested":
+    if (
+        decision_type in terminal_decisions
+        and decision_type != "callback_requested"
+    ):
 
         now = datetime.utcnow()
 
         attempt.status = "completed"
 
-        attempt.result = (
-            decision_type
-        )
+        attempt.result = decision_type
 
         attempt.ended_at = now
 
@@ -1134,12 +1335,14 @@ def ai_call_message(
         crm_result = update_lead_after_call(
             zoho_lead_id=lead.zoho_lead_id,
             outcome=decision_type,
-            sentiment=analysis.get(
-                "sentiment"
-            ) or "neutral",
-            summary=analysis.get(
-                "summary"
-            ) or ""
+            sentiment=(
+                analysis.get("sentiment")
+                or "neutral"
+            ),
+            summary=(
+                analysis.get("summary")
+                or ""
+            )
         )
 
         db.commit()
@@ -1161,8 +1364,8 @@ def ai_call_message(
         "status": "success",
 
         "message": (
-            "AI response, call intelligence and "
-            "decision saved successfully"
+            "AI response, call intelligence "
+            "and decision saved successfully"
         ),
 
         "call": {
@@ -1200,6 +1403,7 @@ def ai_call_message(
         "crm": crm_result
     }
 
+
 # =====================================================
 # END AI CALL + CRM UPDATE
 # =====================================================
@@ -1223,6 +1427,7 @@ def end_ai_call(
     )
 
     if not queue_item:
+
         raise HTTPException(
             status_code=404,
             detail="Call queue item not found"
@@ -1241,6 +1446,7 @@ def end_ai_call(
     )
 
     if not lead:
+
         raise HTTPException(
             status_code=404,
             detail="Lead not found"
@@ -1255,11 +1461,14 @@ def end_ai_call(
         .filter(
             CallAttempt.queue_id == queue_id
         )
-        .order_by(CallAttempt.attempt_number.desc())
+        .order_by(
+            CallAttempt.attempt_number.desc()
+        )
         .first()
     )
 
     if not attempt:
+
         raise HTTPException(
             status_code=400,
             detail="No call attempt found"
@@ -1274,11 +1483,14 @@ def end_ai_call(
         .filter(
             CallIntelligence.queue_id == queue_id
         )
-        .order_by(CallIntelligence.id.desc())
+        .order_by(
+            CallIntelligence.id.desc()
+        )
         .first()
     )
 
     if not intelligence:
+
         raise HTTPException(
             status_code=400,
             detail="No call intelligence found"
@@ -1291,12 +1503,20 @@ def end_ai_call(
     now = datetime.utcnow()
 
     attempt.status = "completed"
-    attempt.result = intelligence.outcome or "answered"
+
+    attempt.result = (
+        intelligence.outcome
+        or "answered"
+    )
+
     attempt.ended_at = now
+
     attempt.failure_reason = None
 
     queue_item.status = "completed"
+
     queue_item.completed_at = now
+
     queue_item.failure_reason = None
 
     # =================================================
@@ -1305,9 +1525,18 @@ def end_ai_call(
 
     crm_result = update_lead_after_call(
         zoho_lead_id=lead.zoho_lead_id,
-        outcome=intelligence.outcome or "answered",
-        sentiment=intelligence.sentiment or "neutral",
-        summary=intelligence.summary or ""
+        outcome=(
+            intelligence.outcome
+            or "answered"
+        ),
+        sentiment=(
+            intelligence.sentiment
+            or "neutral"
+        ),
+        summary=(
+            intelligence.summary
+            or ""
+        )
     )
 
     # =================================================
@@ -1325,7 +1554,10 @@ def end_ai_call(
 
     return {
         "status": "success",
-        "message": "AI call ended and CRM updated successfully",
+        "message": (
+            "AI call ended and CRM updated "
+            "successfully"
+        ),
 
         "call": {
             "queue_id": queue_item.id,
@@ -1347,6 +1579,7 @@ def end_ai_call(
         "crm": crm_result
     }
 
+
 # =====================================================
 # PROCESS DUE CALLBACKS
 # =====================================================
@@ -1355,7 +1588,10 @@ def end_ai_call(
 def process_due_callbacks_endpoint(
     db: Session = Depends(get_db)
 ):
-    return process_due_callbacks(db)
+
+    return process_due_callbacks(
+        db
+    )
 
 
 # =====================================================
@@ -1368,6 +1604,7 @@ def schedule_callback_endpoint(
     request: CallbackRequest,
     db: Session = Depends(get_db)
 ):
+
     result = schedule_callback(
         queue_id=queue_id,
         callback_at=request.callback_at,
