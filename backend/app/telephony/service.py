@@ -12,7 +12,13 @@ from dotenv import load_dotenv
 
 load_dotenv(
     os.path.join(
-        os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))),
+        os.path.dirname(
+            os.path.dirname(
+                os.path.dirname(
+                    os.path.dirname(__file__)
+                )
+            )
+        ),
         ".env"
     )
 )
@@ -27,8 +33,8 @@ EXOTEL_API_TOKEN = os.getenv("EXOTEL_API_TOKEN")
 EXOTEL_ACCOUNT_SID = os.getenv("EXOTEL_ACCOUNT_SID")
 EXOTEL_CALLER_ID = os.getenv("EXOTEL_CALLER_ID")
 
-# This is YOUR verified phone number.
-# Keep it only inside .env — never paste it here.
+# This is your verified phone number.
+# Keep it only inside .env.
 EXOTEL_TEST_TO = os.getenv("EXOTEL_TEST_TO")
 
 EXOTEL_BASE_URL = "https://api.exotel.com"
@@ -46,14 +52,15 @@ def initiate_call(phone: str, queue_id: int, attempt_id: int):
         Lead/customer phone number.
 
     EXOTEL_TEST_TO:
-        Your verified phone number used as the second
-        leg during the initial API integration test.
+        Verified phone number used as the second leg
+        during the initial API integration test.
     """
 
     if not phone:
         return {
             "success": False,
-            "message": "Phone number is required"
+            "message": "Phone number is required",
+            "retryable": False
         }
 
     if (
@@ -64,13 +71,15 @@ def initiate_call(phone: str, queue_id: int, attempt_id: int):
     ):
         return {
             "success": False,
-            "message": "Exotel configuration is incomplete"
+            "message": "Exotel configuration is incomplete",
+            "retryable": False
         }
 
     if not EXOTEL_TEST_TO:
         return {
             "success": False,
-            "message": "EXOTEL_TEST_TO is not configured"
+            "message": "EXOTEL_TEST_TO is not configured",
+            "retryable": False
         }
 
     # -------------------------------------------------
@@ -119,13 +128,12 @@ def initiate_call(phone: str, queue_id: int, attempt_id: int):
         # -------------------------------------------------
 
         if response.ok:
-            call_data = response_data
-
-            # Exotel normally returns Call.Sid
             call_id = None
 
+            # Exotel normally returns Call.Sid
             if isinstance(response_data, dict):
                 call_info = response_data.get("Call", {})
+
                 if isinstance(call_info, dict):
                     call_id = call_info.get("Sid")
 
@@ -160,6 +168,7 @@ def initiate_call(phone: str, queue_id: int, attempt_id: int):
             "attempt_id": attempt_id,
             "http_status": response.status_code,
             "message": "Exotel API request failed",
+            "retryable": response.status_code >= 500,
             "response": response_data
         }
 
@@ -171,6 +180,7 @@ def initiate_call(phone: str, queue_id: int, attempt_id: int):
             "queue_id": queue_id,
             "attempt_id": attempt_id,
             "message": "Unable to connect to Exotel",
+            "retryable": True,
             "error": str(exc)
         }
 

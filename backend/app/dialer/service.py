@@ -115,6 +115,26 @@ def process_next_call(db: Session):
         attempt.failure_reason = call.get("message")
         attempt.ended_at = datetime.utcnow()
 
+        retryable = call.get("retryable", False)
+
+        if retryable and attempt.attempt_number < 3:
+            queue_item.status = "queued"
+            queue_item.failure_reason = call.get("message")
+            queue_item.completed_at = None
+
+            db.commit()
+
+            return {
+                "queue_id": queue_item.id,
+                "phone": queue_item.phone,
+                "queue_status": queue_item.status,
+                "attempt_id": attempt.id,
+                "attempt_number": attempt.attempt_number,
+                "attempt_status": attempt.status,
+                "retry": True,
+                "failure_reason": attempt.failure_reason
+            }
+
         queue_item.status = "failed"
         queue_item.completed_at = datetime.utcnow()
         queue_item.failure_reason = call.get("message")
@@ -128,9 +148,11 @@ def process_next_call(db: Session):
             "attempt_id": attempt.id,
             "attempt_number": attempt.attempt_number,
             "attempt_status": attempt.status,
+            "retry": False,
             "failure_reason": attempt.failure_reason
         }
-
+    
+    
     # Save provider tracking information
     attempt.provider = call.get("provider")
     attempt.provider_call_id = call.get("call_id")
