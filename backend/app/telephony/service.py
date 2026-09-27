@@ -5,16 +5,19 @@ import os
 import requests
 from dotenv import load_dotenv
 
+
 # =====================================================
 # ENVIRONMENT CONFIGURATION
 # =====================================================
 
 load_dotenv(
     os.path.join(
-        os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))),
         ".env"
     )
 )
+
+
 # =====================================================
 # EXOTEL CONFIGURATION
 # =====================================================
@@ -24,7 +27,11 @@ EXOTEL_API_TOKEN = os.getenv("EXOTEL_API_TOKEN")
 EXOTEL_ACCOUNT_SID = os.getenv("EXOTEL_ACCOUNT_SID")
 EXOTEL_CALLER_ID = os.getenv("EXOTEL_CALLER_ID")
 
-EXOTEL_BASE_URL = "https://api.in.exotel.com"
+# This is YOUR verified phone number.
+# Keep it only inside .env — never paste it here.
+EXOTEL_TEST_TO = os.getenv("EXOTEL_TEST_TO")
+
+EXOTEL_BASE_URL = "https://api.exotel.com"
 
 
 # =====================================================
@@ -33,10 +40,14 @@ EXOTEL_BASE_URL = "https://api.in.exotel.com"
 
 def initiate_call(phone: str, queue_id: int, attempt_id: int):
     """
-    Prepare an outbound call through Exotel.
+    Initiate an outbound call through Exotel.
 
-    The actual Exotel API call will be enabled after
-    ExoPhone and Call Flow configuration is complete.
+    phone:
+        Lead/customer phone number.
+
+    EXOTEL_TEST_TO:
+        Your verified phone number used as the second
+        leg during the initial API integration test.
     """
 
     if not phone:
@@ -56,51 +67,112 @@ def initiate_call(phone: str, queue_id: int, attempt_id: int):
             "message": "Exotel configuration is incomplete"
         }
 
-    # Exotel outbound call endpoint
+    if not EXOTEL_TEST_TO:
+        return {
+            "success": False,
+            "message": "EXOTEL_TEST_TO is not configured"
+        }
+
+    # -------------------------------------------------
+    # EXOTEL OUTBOUND CALL ENDPOINT
+    # -------------------------------------------------
+
     exotel_url = (
         f"{EXOTEL_BASE_URL}"
         f"/v1/Accounts/{EXOTEL_ACCOUNT_SID}"
         f"/Calls/connect"
     )
 
-    # Request headers
-    headers = {
-        "Accept": "application/json"
-    }
+    # -------------------------------------------------
+    # EXOTEL PARAMETERS
+    # -------------------------------------------------
 
-    # Exotel call parameters
     payload = {
         "From": phone,
+        "To": EXOTEL_TEST_TO,
         "CallerId": EXOTEL_CALLER_ID
     }
 
     # -------------------------------------------------
-    # TEMPORARY SAFE MODE
-    # -------------------------------------------------
-    # Do not send the request yet because the Exotel
-    # account / ExoPhone flow configuration is not
-    # confirmed as active.
-    #
-    # The URL, headers and payload are prepared so that
-    # the real API integration can be enabled safely.
+    # MAKE ACTUAL API REQUEST
     # -------------------------------------------------
 
-    call_id = f"CALL-{uuid4().hex[:10].upper()}"
+    try:
+        response = requests.post(
+            exotel_url,
+            auth=(EXOTEL_API_KEY, EXOTEL_API_TOKEN),
+            data=payload,
+            headers={
+                "Accept": "application/json"
+            },
+            timeout=30
+        )
 
-    return {
-        "success": True,
-        "provider": "exotel",
-        "mode": "prepared",
-        "call_id": call_id,
-        "queue_id": queue_id,
-        "attempt_id": attempt_id,
-        "phone": phone,
-        "caller_id": EXOTEL_CALLER_ID,
-        "status": "ready",
-        "exotel_url": exotel_url,
-        "payload": payload,
-        "initiated_at": datetime.utcnow()
-    }
+        # Try JSON first
+        try:
+            response_data = response.json()
+        except ValueError:
+            response_data = response.text
+
+        # -------------------------------------------------
+        # SUCCESS
+        # -------------------------------------------------
+
+        if response.ok:
+            call_data = response_data
+
+            # Exotel normally returns Call.Sid
+            call_id = None
+
+            if isinstance(response_data, dict):
+                call_info = response_data.get("Call", {})
+                if isinstance(call_info, dict):
+                    call_id = call_info.get("Sid")
+
+            if not call_id:
+                call_id = f"CALL-{uuid4().hex[:10].upper()}"
+
+            return {
+                "success": True,
+                "provider": "exotel",
+                "mode": "live",
+                "call_id": call_id,
+                "queue_id": queue_id,
+                "attempt_id": attempt_id,
+                "phone": phone,
+                "to": EXOTEL_TEST_TO,
+                "caller_id": EXOTEL_CALLER_ID,
+                "status": "initiated",
+                "http_status": response.status_code,
+                "response": response_data,
+                "initiated_at": datetime.utcnow()
+            }
+
+        # -------------------------------------------------
+        # EXOTEL API ERROR
+        # -------------------------------------------------
+
+        return {
+            "success": False,
+            "provider": "exotel",
+            "mode": "live",
+            "queue_id": queue_id,
+            "attempt_id": attempt_id,
+            "http_status": response.status_code,
+            "message": "Exotel API request failed",
+            "response": response_data
+        }
+
+    except requests.RequestException as exc:
+        return {
+            "success": False,
+            "provider": "exotel",
+            "mode": "live",
+            "queue_id": queue_id,
+            "attempt_id": attempt_id,
+            "message": "Unable to connect to Exotel",
+            "error": str(exc)
+        }
 
 
 # =====================================================
@@ -109,10 +181,7 @@ def initiate_call(phone: str, queue_id: int, attempt_id: int):
 
 def get_call_status(call_id: str):
     """
-    Get the current status of an Exotel call.
-
-    Real call-status API integration will be added
-    after the outbound call flow is active.
+    Placeholder for real Exotel call-status integration.
     """
 
     if not call_id:
@@ -135,10 +204,7 @@ def get_call_status(call_id: str):
 
 def end_call(call_id: str):
     """
-    End an active call.
-
-    Real Exotel call termination will be added after
-    the outbound call integration is active.
+    Placeholder for real Exotel call termination.
     """
 
     if not call_id:
