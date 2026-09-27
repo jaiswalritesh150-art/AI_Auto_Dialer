@@ -4,15 +4,8 @@ import asyncio
 from datetime import datetime
 from sqlalchemy.orm import Session
 
-# =====================================================
-# DATABASE
-# =====================================================
 
 from app.database import Base, engine, get_db, SessionLocal
-
-# =====================================================
-# MODELS
-# =====================================================
 
 from app.models import (
     Lead,
@@ -20,10 +13,6 @@ from app.models import (
     CallAttempt,
     CallIntelligence
 )
-
-# =====================================================
-# SCHEMAS
-# =====================================================
 
 from app.schemas.lead import LeadCreate
 from app.schemas.call import CallResultRequest
@@ -659,6 +648,7 @@ def initiate_telephony_call(
         )
 
     if attempt.provider_call_id:
+
         return {
             "success": True,
             "queue_id": queue_item.id,
@@ -682,8 +672,6 @@ def initiate_telephony_call(
             status_code=400,
             detail=call.get("message")
         )
-
-    # Save telephony provider details
 
     attempt.provider = call.get("provider")
     attempt.provider_call_id = call.get(
@@ -738,10 +726,6 @@ def create_call_intelligence(
     db: Session = Depends(get_db)
 ):
 
-    # =================================================
-    # FIND QUEUE
-    # =================================================
-
     queue_item = (
         db.query(CallQueue)
         .filter(
@@ -756,10 +740,6 @@ def create_call_intelligence(
             status_code=404,
             detail="Call queue item not found"
         )
-
-    # =================================================
-    # FIND ATTEMPT
-    # =================================================
 
     attempt = (
         db.query(CallAttempt)
@@ -777,10 +757,6 @@ def create_call_intelligence(
             detail="Call attempt not found"
         )
 
-    # =================================================
-    # AI ANALYSIS
-    # =================================================
-
     try:
 
         analysis = analyze_call_transcript(
@@ -794,10 +770,6 @@ def create_call_intelligence(
             detail=f"AI analysis failed: {str(exc)}"
         )
 
-    # =================================================
-    # SAVE INTELLIGENCE
-    # =================================================
-
     intelligence = CallIntelligence(
         queue_id=request.queue_id,
         attempt_id=request.attempt_id,
@@ -810,10 +782,6 @@ def create_call_intelligence(
     db.add(intelligence)
     db.commit()
     db.refresh(intelligence)
-
-    # =================================================
-    # RESPONSE
-    # =================================================
 
     return {
         "status": "success",
@@ -844,10 +812,6 @@ def ai_call(
     db: Session = Depends(get_db)
 ):
 
-    # =================================================
-    # FIND QUEUE
-    # =================================================
-
     queue_item = (
         db.query(CallQueue)
         .filter(
@@ -863,10 +827,6 @@ def ai_call(
             detail="Call queue item not found"
         )
 
-    # =================================================
-    # FIND LEAD
-    # =================================================
-
     lead = (
         db.query(Lead)
         .filter(
@@ -881,10 +841,6 @@ def ai_call(
             status_code=404,
             detail="Lead not found"
         )
-
-    # =================================================
-    # FIND LATEST ATTEMPT
-    # =================================================
 
     attempt = (
         db.query(CallAttempt)
@@ -903,10 +859,6 @@ def ai_call(
             status_code=400,
             detail="No call attempt found"
         )
-
-    # =================================================
-    # INITIATE SIMULATED CALL
-    # =================================================
 
     if attempt.provider_call_id:
 
@@ -941,7 +893,7 @@ def ai_call(
 
         db.commit()
         db.refresh(attempt)
-         
+
     # =================================================
     # LEAD CONTEXT
     # =================================================
@@ -984,10 +936,6 @@ def ai_call(
             status_code=500,
             detail=f"AI calling failed: {str(exc)}"
         )
-
-    # =================================================
-    # RESPONSE
-    # =================================================
 
     return {
         "status": "success",
@@ -1082,9 +1030,11 @@ def ai_call_message(
     # =================================================
     # CONVERSATION
     # =================================================
+
     conversation = list(
         request.conversation
     )
+
     # Load previous conversation from latest intelligence
     previous_intelligence = (
         db.query(CallIntelligence)
@@ -1097,9 +1047,15 @@ def ai_call_message(
         )
         .first()
     )
-    if previous_intelligence and previous_intelligence.transcript:
 
-        previous_lines = previous_intelligence.transcript.split("\n")
+    if (
+        previous_intelligence
+        and previous_intelligence.transcript
+    ):
+
+        previous_lines = (
+            previous_intelligence.transcript.split("\n")
+        )
 
         conversation = []
 
@@ -1284,8 +1240,13 @@ def ai_call_message(
 
     if decision_type == "callback_requested":
 
+        callback_text = "\n".join(
+            message.get("text", "")
+            for message in conversation
+        )
+
         callback_at = extract_callback_time(
-            request.message
+            callback_text
         )
 
         if callback_at:
