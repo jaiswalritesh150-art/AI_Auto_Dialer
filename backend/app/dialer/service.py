@@ -622,26 +622,20 @@ def process_due_callbacks(db: Session):
 
     for queue_item in due_callbacks:
 
-        # -------------------------------------------------
         # Mark callback as being processed
-        # -------------------------------------------------
-
         queue_item.status = "queued"
         queue_item.callback_status = "processing"
 
         db.commit()
 
-        # -------------------------------------------------
         # Automatically create a new call attempt
-        # -------------------------------------------------
-
         call_result = process_specific_call(
             queue_id=queue_item.id,
             db=db
         )
 
         # -------------------------------------------------
-        # Callback was successfully consumed
+        # CALL INITIATED SUCCESSFULLY
         # -------------------------------------------------
 
         if call_result.get("success"):
@@ -652,11 +646,25 @@ def process_due_callbacks(db: Session):
             db.commit()
             db.refresh(queue_item)
 
-        else:
+        # -------------------------------------------------
+        # RETRYABLE FAILURE
+        # -------------------------------------------------
 
-            # -------------------------------------------------
-            # Callback processing failed
-            # -------------------------------------------------
+        elif call_result.get("retry"):
+
+            # Keep callback out of failed state.
+            # The queue has already been returned to "queued"
+            # and can be processed again.
+            queue_item.callback_status = "processing"
+
+            db.commit()
+            db.refresh(queue_item)
+
+        # -------------------------------------------------
+        # NON-RETRYABLE FAILURE
+        # -------------------------------------------------
+
+        else:
 
             queue_item.callback_status = "failed"
 
@@ -674,6 +682,7 @@ def process_due_callbacks(db: Session):
             "attempt_id": call_result.get("attempt_id"),
             "attempt_number": call_result.get("attempt_number"),
             "attempt_status": call_result.get("attempt_status"),
+            "retry": call_result.get("retry", False),
             "success": call_result.get("success", False)
         })
 
