@@ -13,7 +13,6 @@ from app.telephony.service import initiate_call
 def queue_lead(lead, db: Session):
     """
     Add a lead to the PostgreSQL call queue.
-    Actual calling provider will be connected later.
     """
 
     queue_item = CallQueue(
@@ -48,7 +47,6 @@ def process_next_call(db: Session):
     Maximum attempts = 3.
     """
 
-    # Find the oldest queued call
     queue_item = (
         db.query(CallQueue)
         .filter(CallQueue.status == "queued")
@@ -66,10 +64,9 @@ def process_next_call(db: Session):
         .count()
     )
 
-    # Calculate next attempt number
     attempt_number = previous_attempts + 1
 
-    # Safety check
+    # Maximum 3 attempts
     if attempt_number > 3:
         queue_item.status = "failed"
         queue_item.completed_at = datetime.utcnow()
@@ -87,11 +84,10 @@ def process_next_call(db: Session):
     # Mark queue item as calling
     queue_item.status = "calling"
 
-    # Set initial start time only once
     if queue_item.started_at is None:
         queue_item.started_at = datetime.utcnow()
 
-    # Create new call attempt
+    # Create call attempt
     attempt = CallAttempt(
         queue_id=queue_item.id,
         attempt_number=attempt_number,
@@ -110,14 +106,22 @@ def process_next_call(db: Session):
         attempt_id=attempt.id
     )
 
+    # -------------------------------------------------
+    # TELEPHONY FAILURE
+    # -------------------------------------------------
+
     if not call.get("success"):
+
         attempt.status = "failed"
         attempt.failure_reason = call.get("message")
         attempt.ended_at = datetime.utcnow()
 
         retryable = call.get("retryable", False)
 
+        # Retry if provider/network error is retryable
+        # and maximum attempts has not been reached.
         if retryable and attempt.attempt_number < 3:
+
             queue_item.status = "queued"
             queue_item.failure_reason = call.get("message")
             queue_item.completed_at = None
@@ -135,6 +139,7 @@ def process_next_call(db: Session):
                 "failure_reason": attempt.failure_reason
             }
 
+        # Non-retryable error or maximum attempts reached
         queue_item.status = "failed"
         queue_item.completed_at = datetime.utcnow()
         queue_item.failure_reason = call.get("message")
@@ -151,9 +156,11 @@ def process_next_call(db: Session):
             "retry": False,
             "failure_reason": attempt.failure_reason
         }
-    
-    
-    # Save provider tracking information
+
+    # -------------------------------------------------
+    # TELEPHONY SUCCESS
+    # -------------------------------------------------
+
     attempt.provider = call.get("provider")
     attempt.provider_call_id = call.get("call_id")
     attempt.status = "initiated"
@@ -225,6 +232,7 @@ def process_specific_call(
 
     # Maximum 3 attempts
     if attempt_number > 3:
+
         queue_item.status = "failed"
         queue_item.completed_at = datetime.utcnow()
         queue_item.failure_reason = "Maximum call attempts reached"
@@ -234,7 +242,8 @@ def process_specific_call(
         return {
             "success": False,
             "message": "Maximum call attempts reached",
-            "queue_id": queue_id
+            "queue_id": queue_id,
+            "queue_status": queue_item.status
         }
 
     # Mark queue as calling
@@ -263,11 +272,41 @@ def process_specific_call(
         attempt_id=attempt.id
     )
 
+    # -------------------------------------------------
+    # TELEPHONY FAILURE
+    # -------------------------------------------------
+
     if not call.get("success"):
+
         attempt.status = "failed"
         attempt.failure_reason = call.get("message")
         attempt.ended_at = datetime.utcnow()
 
+        retryable = call.get("retryable", False)
+
+        # Retry if provider/network error is retryable
+        # and maximum attempts has not been reached.
+        if retryable and attempt.attempt_number < 3:
+
+            queue_item.status = "queued"
+            queue_item.failure_reason = call.get("message")
+            queue_item.completed_at = None
+
+            db.commit()
+
+            return {
+                "success": False,
+                "queue_id": queue_item.id,
+                "phone": queue_item.phone,
+                "queue_status": queue_item.status,
+                "attempt_id": attempt.id,
+                "attempt_number": attempt.attempt_number,
+                "attempt_status": attempt.status,
+                "retry": True,
+                "failure_reason": attempt.failure_reason
+            }
+
+        # Non-retryable error or maximum attempts reached
         queue_item.status = "failed"
         queue_item.completed_at = datetime.utcnow()
         queue_item.failure_reason = call.get("message")
@@ -282,10 +321,14 @@ def process_specific_call(
             "attempt_id": attempt.id,
             "attempt_number": attempt.attempt_number,
             "attempt_status": attempt.status,
+            "retry": False,
             "failure_reason": attempt.failure_reason
         }
 
-    # Save provider tracking information
+    # -------------------------------------------------
+    # TELEPHONY SUCCESS
+    # -------------------------------------------------
+
     attempt.provider = call.get("provider")
     attempt.provider_call_id = call.get("call_id")
     attempt.status = "initiated"
@@ -451,10 +494,7 @@ def handle_call_result(
                 "next_attempt": attempt.attempt_number + 1
             }
 
-        # =================================================
-        # MAXIMUM ATTEMPTS REACHED
-        # =================================================
-
+        # Maximum attempts reached
         queue_item.status = "failed"
         queue_item.completed_at = datetime.utcnow()
         queue_item.failure_reason = (
@@ -520,7 +560,6 @@ def schedule_callback(
     Schedule a callback for an existing call queue item.
     """
 
-    # Find queue item
     queue_item = (
         db.query(CallQueue)
         .filter(CallQueue.id == queue_id)
