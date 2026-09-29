@@ -715,11 +715,9 @@ def telephony_end_call(
         call_id
     )
 
-
 # =====================================================
 # CALL INTELLIGENCE
 # =====================================================
-
 @app.post("/api/v1/call-intelligence")
 def create_call_intelligence(
     request: CallIntelligenceRequest,
@@ -728,14 +726,11 @@ def create_call_intelligence(
 
     queue_item = (
         db.query(CallQueue)
-        .filter(
-            CallQueue.id == request.queue_id
-        )
+        .filter(CallQueue.id == request.queue_id)
         .first()
     )
 
     if not queue_item:
-
         raise HTTPException(
             status_code=404,
             detail="Call queue item not found"
@@ -751,10 +746,21 @@ def create_call_intelligence(
     )
 
     if not attempt:
-
         raise HTTPException(
             status_code=404,
             detail="Call attempt not found"
+        )
+
+    lead = (
+        db.query(Lead)
+        .filter(Lead.id == queue_item.lead_id)
+        .first()
+    )
+
+    if not lead:
+        raise HTTPException(
+            status_code=404,
+            detail="Lead not found"
         )
 
     try:
@@ -783,11 +789,22 @@ def create_call_intelligence(
     db.commit()
     db.refresh(intelligence)
 
+    # =================================================
+    # UPDATE ZOHO CRM
+    # =================================================
+
+    crm_result = update_lead_after_call(
+        zoho_lead_id=lead.zoho_lead_id,
+        outcome=analysis.get("outcome") or "answered",
+        sentiment=analysis.get("sentiment") or "neutral",
+        summary=analysis.get("summary") or ""
+    )
+
     return {
         "status": "success",
         "message": (
-            "Call intelligence analyzed and "
-            "saved successfully"
+            "Call intelligence analyzed, saved "
+            "and CRM updated successfully"
         ),
         "call_intelligence": {
             "id": intelligence.id,
@@ -798,10 +815,10 @@ def create_call_intelligence(
             "sentiment": intelligence.sentiment,
             "outcome": intelligence.outcome,
             "analyzed_at": intelligence.analyzed_at
-        }
+        },
+        "crm": crm_result
     }
-
-
+    
 # =====================================================
 # AI CALLING
 # =====================================================
