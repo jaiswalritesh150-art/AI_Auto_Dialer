@@ -252,10 +252,8 @@ def get_call_queue(
             for item in queue_items
         ]
     }
-
-
 # =====================================================
-# GET ALL CALL ATTEMPTS
+# GET ALL CALL ATTEMPTS / CALL HISTORY
 # =====================================================
 
 @app.get("/api/v1/call-attempts")
@@ -277,19 +275,35 @@ def get_call_attempts(
                 "id": attempt.id,
                 "queue_id": attempt.queue_id,
                 "attempt_number": attempt.attempt_number,
+
+                # Call status
                 "status": attempt.status,
-                "started_at": attempt.started_at,
-                "ended_at": attempt.ended_at,
                 "result": attempt.result,
                 "failure_reason": attempt.failure_reason,
+
+                # Timing
+                "started_at": attempt.started_at,
+                "ended_at": attempt.ended_at,
+                "duration_seconds": attempt.duration_seconds,
+
+                # Telephony
                 "provider": attempt.provider,
-                "provider_call_id": attempt.provider_call_id
+                "provider_call_id": attempt.provider_call_id,
+                "recording_url": attempt.recording_url,
+                "recording_reference": attempt.recording_reference,
+
+                # Human agent / transfer
+                "transfer_status": attempt.transfer_status,
+                "agent_id": attempt.agent_id,
+
+                # Customer information
+                "customer_intent": attempt.customer_intent,
+                "customer_notes": attempt.customer_notes,
+                "next_action": attempt.next_action
             }
             for attempt in attempts
         ]
     }
-
-
 # =====================================================
 # GET CALL ATTEMPTS FOR SPECIFIC QUEUE
 # =====================================================
