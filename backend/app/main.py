@@ -1252,6 +1252,7 @@ def ai_call_message(
     # AUTOMATIC CALLBACK SCHEDULING
     # =================================================
 
+    crm_result = None
     callback_scheduled = False
     callback_at = None
 
@@ -1279,6 +1280,22 @@ def ai_call_message(
                 False
             )
 
+            # =================================================
+            # UPDATE CRM FOR CALLBACK
+            # =================================================
+
+            crm_result = update_lead_after_call(
+                zoho_lead_id=lead.zoho_lead_id,
+                outcome="callback_requested",
+                sentiment=(
+                    analysis.get("sentiment")
+                    or "neutral"
+                ),
+                summary=(
+                    analysis.get("summary")
+                    or ""
+                )
+            )
     # =================================================
     # CALL END CONTROL
     # =================================================
@@ -1329,10 +1346,6 @@ def ai_call_message(
         db.refresh(queue_item)
 
         call_ended = True
-
-    else:
-
-        crm_result = None
 
     # =================================================
     # RESPONSE

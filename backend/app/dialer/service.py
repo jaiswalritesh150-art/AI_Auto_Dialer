@@ -2,8 +2,9 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 
-from app.models import CallQueue, CallAttempt
+from app.models import CallQueue, CallAttempt, Lead
 from app.telephony.service import initiate_call
+from app.crm.service import update_lead_after_call
 
 
 # =====================================================
@@ -57,7 +58,6 @@ def process_next_call(db: Session):
     if not queue_item:
         return None
 
-    # Count previous attempts
     previous_attempts = (
         db.query(CallAttempt)
         .filter(CallAttempt.queue_id == queue_item.id)
@@ -66,7 +66,6 @@ def process_next_call(db: Session):
 
     attempt_number = previous_attempts + 1
 
-    # Maximum 3 attempts
     if attempt_number > 3:
         queue_item.status = "failed"
         queue_item.completed_at = datetime.utcnow()
@@ -81,13 +80,11 @@ def process_next_call(db: Session):
             "message": "Maximum call attempts reached"
         }
 
-    # Mark queue item as calling
     queue_item.status = "calling"
 
     if queue_item.started_at is None:
         queue_item.started_at = datetime.utcnow()
 
-    # Create call attempt
     attempt = CallAttempt(
         queue_id=queue_item.id,
         attempt_number=attempt_number,
@@ -99,7 +96,6 @@ def process_next_call(db: Session):
     db.commit()
     db.refresh(attempt)
 
-    # Initiate telephony call
     call = initiate_call(
         phone=queue_item.phone,
         queue_id=queue_item.id,
@@ -116,10 +112,19 @@ def process_next_call(db: Session):
         attempt.failure_reason = call.get("message")
         attempt.ended_at = datetime.utcnow()
 
+        # Calculate duration for failed attempt
+        if attempt.started_at and attempt.ended_at:
+            attempt.duration_seconds = max(
+                0,
+                int(
+                    (
+                        attempt.ended_at - attempt.started_at
+                    ).total_seconds()
+                )
+            )
+
         retryable = call.get("retryable", False)
 
-        # Retry if provider/network error is retryable
-        # and maximum attempts has not been reached.
         if retryable and attempt.attempt_number < 3:
 
             queue_item.status = "queued"
@@ -135,11 +140,11 @@ def process_next_call(db: Session):
                 "attempt_id": attempt.id,
                 "attempt_number": attempt.attempt_number,
                 "attempt_status": attempt.status,
+                "duration_seconds": attempt.duration_seconds,
                 "retry": True,
                 "failure_reason": attempt.failure_reason
             }
 
-        # Non-retryable error or maximum attempts reached
         queue_item.status = "failed"
         queue_item.completed_at = datetime.utcnow()
         queue_item.failure_reason = call.get("message")
@@ -153,6 +158,7 @@ def process_next_call(db: Session):
             "attempt_id": attempt.id,
             "attempt_number": attempt.attempt_number,
             "attempt_status": attempt.status,
+            "duration_seconds": attempt.duration_seconds,
             "retry": False,
             "failure_reason": attempt.failure_reason
         }
@@ -197,7 +203,6 @@ def process_specific_call(
     Maximum attempts = 3.
     """
 
-    # Find specific queue item
     queue_item = (
         db.query(CallQueue)
         .filter(CallQueue.id == queue_id)
@@ -210,7 +215,6 @@ def process_specific_call(
             "message": "Call queue item not found"
         }
 
-    # Only queued calls can be processed
     if queue_item.status != "queued":
         return {
             "success": False,
@@ -220,17 +224,14 @@ def process_specific_call(
             )
         }
 
-    # Count previous attempts
     previous_attempts = (
         db.query(CallAttempt)
         .filter(CallAttempt.queue_id == queue_id)
         .count()
     )
 
-    # Calculate next attempt number
     attempt_number = previous_attempts + 1
 
-    # Maximum 3 attempts
     if attempt_number > 3:
 
         queue_item.status = "failed"
@@ -246,14 +247,11 @@ def process_specific_call(
             "queue_status": queue_item.status
         }
 
-    # Mark queue as calling
     queue_item.status = "calling"
 
-    # Keep original started_at
     if queue_item.started_at is None:
         queue_item.started_at = datetime.utcnow()
 
-    # Create new call attempt
     attempt = CallAttempt(
         queue_id=queue_item.id,
         attempt_number=attempt_number,
@@ -265,7 +263,6 @@ def process_specific_call(
     db.commit()
     db.refresh(attempt)
 
-    # Initiate telephony call
     call = initiate_call(
         phone=queue_item.phone,
         queue_id=queue_item.id,
@@ -282,10 +279,19 @@ def process_specific_call(
         attempt.failure_reason = call.get("message")
         attempt.ended_at = datetime.utcnow()
 
+        # Calculate duration for failed attempt
+        if attempt.started_at and attempt.ended_at:
+            attempt.duration_seconds = max(
+                0,
+                int(
+                    (
+                        attempt.ended_at - attempt.started_at
+                    ).total_seconds()
+                )
+            )
+
         retryable = call.get("retryable", False)
 
-        # Retry if provider/network error is retryable
-        # and maximum attempts has not been reached.
         if retryable and attempt.attempt_number < 3:
 
             queue_item.status = "queued"
@@ -302,11 +308,11 @@ def process_specific_call(
                 "attempt_id": attempt.id,
                 "attempt_number": attempt.attempt_number,
                 "attempt_status": attempt.status,
+                "duration_seconds": attempt.duration_seconds,
                 "retry": True,
                 "failure_reason": attempt.failure_reason
             }
 
-        # Non-retryable error or maximum attempts reached
         queue_item.status = "failed"
         queue_item.completed_at = datetime.utcnow()
         queue_item.failure_reason = call.get("message")
@@ -321,6 +327,7 @@ def process_specific_call(
             "attempt_id": attempt.id,
             "attempt_number": attempt.attempt_number,
             "attempt_status": attempt.status,
+            "duration_seconds": attempt.duration_seconds,
             "retry": False,
             "failure_reason": attempt.failure_reason
         }
@@ -365,9 +372,6 @@ def handle_call_result(
     """
     Process the result of a call attempt.
 
-    Successful call:
-        completed
-
     Retryable results:
         no_answer
         busy
@@ -376,10 +380,6 @@ def handle_call_result(
     Maximum attempts:
         3
     """
-
-    # =================================================
-    # FIND QUEUE ITEM
-    # =================================================
 
     queue_item = (
         db.query(CallQueue)
@@ -393,10 +393,6 @@ def handle_call_result(
             "message": "Call queue item not found"
         }
 
-    # =================================================
-    # FIND CALL ATTEMPT
-    # =================================================
-
     attempt = (
         db.query(CallAttempt)
         .filter(CallAttempt.id == attempt_id)
@@ -409,24 +405,30 @@ def handle_call_result(
             "message": "Call attempt not found"
         }
 
-    # =================================================
-    # VERIFY ATTEMPT BELONGS TO QUEUE
-    # =================================================
-
     if attempt.queue_id != queue_id:
         return {
             "success": False,
             "message": "Call attempt does not belong to this queue"
         }
 
-    # =================================================
-    # UPDATE ATTEMPT
-    # =================================================
-
     attempt.status = status
     attempt.result = result
     attempt.failure_reason = failure_reason
     attempt.ended_at = datetime.utcnow()
+
+    # =================================================
+    # CALCULATE CALL DURATION
+    # =================================================
+
+    if attempt.started_at and attempt.ended_at:
+        attempt.duration_seconds = max(
+            0,
+            int(
+                (
+                    attempt.ended_at - attempt.started_at
+                ).total_seconds()
+            )
+        )
 
     # =================================================
     # COMPLETED CALL
@@ -451,7 +453,9 @@ def handle_call_result(
             "attempt_status": attempt.status,
             "result": attempt.result,
             "failure_reason": attempt.failure_reason,
+            "started_at": attempt.started_at,
             "ended_at": attempt.ended_at,
+            "duration_seconds": attempt.duration_seconds,
             "completed_at": queue_item.completed_at,
             "retry": False
         }
@@ -466,14 +470,20 @@ def handle_call_result(
         "failed"
     }
 
-    if result in retryable_results:
+    if (
+        status in retryable_results
+        or result in retryable_results
+    ):
 
-        # Retry available
         if attempt.attempt_number < 3:
 
             queue_item.status = "queued"
             queue_item.completed_at = None
-            queue_item.failure_reason = failure_reason
+            queue_item.failure_reason = (
+                failure_reason
+                or result
+                or status
+            )
 
             db.commit()
 
@@ -488,17 +498,21 @@ def handle_call_result(
                 "attempt_status": attempt.status,
                 "result": attempt.result,
                 "failure_reason": attempt.failure_reason,
+                "started_at": attempt.started_at,
                 "ended_at": attempt.ended_at,
+                "duration_seconds": attempt.duration_seconds,
                 "completed_at": queue_item.completed_at,
                 "retry": True,
                 "next_attempt": attempt.attempt_number + 1
             }
 
-        # Maximum attempts reached
         queue_item.status = "failed"
         queue_item.completed_at = datetime.utcnow()
         queue_item.failure_reason = (
-            failure_reason or "Maximum call attempts reached"
+            failure_reason
+            or result
+            or status
+            or "Maximum call attempts reached"
         )
 
         db.commit()
@@ -514,7 +528,9 @@ def handle_call_result(
             "attempt_status": attempt.status,
             "result": attempt.result,
             "failure_reason": queue_item.failure_reason,
+            "started_at": attempt.started_at,
             "ended_at": attempt.ended_at,
+            "duration_seconds": attempt.duration_seconds,
             "completed_at": queue_item.completed_at,
             "retry": False,
             "message": "Maximum call attempts reached"
@@ -541,7 +557,9 @@ def handle_call_result(
         "attempt_status": attempt.status,
         "result": attempt.result,
         "failure_reason": attempt.failure_reason,
+        "started_at": attempt.started_at,
         "ended_at": attempt.ended_at,
+        "duration_seconds": attempt.duration_seconds,
         "completed_at": queue_item.completed_at,
         "retry": False
     }
@@ -572,11 +590,9 @@ def schedule_callback(
             "message": "Call queue item not found"
         }
 
-    # Save callback details
     queue_item.callback_at = callback_at
     queue_item.callback_status = "scheduled"
 
-    # Update queue status
     queue_item.status = "callback_scheduled"
 
     queue_item.completed_at = None
@@ -622,20 +638,26 @@ def process_due_callbacks(db: Session):
 
     for queue_item in due_callbacks:
 
-        # Mark callback as being processed
+        lead = (
+            db.query(Lead)
+            .filter(Lead.id == queue_item.lead_id)
+            .first()
+        )
+
         queue_item.status = "queued"
         queue_item.callback_status = "processing"
 
         db.commit()
 
-        # Automatically create a new call attempt
         call_result = process_specific_call(
             queue_id=queue_item.id,
             db=db
         )
 
+        crm_result = None
+
         # -------------------------------------------------
-        # CALL INITIATED SUCCESSFULLY
+        # CALLBACK INITIATED
         # -------------------------------------------------
 
         if call_result.get("success"):
@@ -643,30 +665,65 @@ def process_due_callbacks(db: Session):
             queue_item.callback_at = None
             queue_item.callback_status = "completed"
 
+            if lead and lead.zoho_lead_id:
+
+                crm_result = update_lead_after_call(
+                    zoho_lead_id=lead.zoho_lead_id,
+                    outcome="callback_initiated",
+                    sentiment="neutral",
+                    summary=(
+                        "Scheduled callback was initiated "
+                        "by the dialer."
+                    )
+                )
+
             db.commit()
             db.refresh(queue_item)
 
         # -------------------------------------------------
-        # RETRYABLE FAILURE
+        # CALLBACK RETRY
         # -------------------------------------------------
 
         elif call_result.get("retry"):
 
-            # Keep callback out of failed state.
-            # The queue has already been returned to "queued"
-            # and can be processed again.
             queue_item.callback_status = "processing"
+
+            if lead and lead.zoho_lead_id:
+
+                crm_result = update_lead_after_call(
+                    zoho_lead_id=lead.zoho_lead_id,
+                    outcome="callback_retry",
+                    sentiment="neutral",
+                    summary=(
+                        call_result.get("failure_reason")
+                        or "Callback attempt failed and "
+                           "will be retried."
+                    )
+                )
 
             db.commit()
             db.refresh(queue_item)
 
         # -------------------------------------------------
-        # NON-RETRYABLE FAILURE
+        # CALLBACK FAILED
         # -------------------------------------------------
 
         else:
 
             queue_item.callback_status = "failed"
+
+            if lead and lead.zoho_lead_id:
+
+                crm_result = update_lead_after_call(
+                    zoho_lead_id=lead.zoho_lead_id,
+                    outcome="callback_failed",
+                    sentiment="neutral",
+                    summary=(
+                        call_result.get("failure_reason")
+                        or "Scheduled callback could not "
+                           "be initiated."
+                    )
+                )
 
             db.commit()
             db.refresh(queue_item)
@@ -682,8 +739,12 @@ def process_due_callbacks(db: Session):
             "attempt_id": call_result.get("attempt_id"),
             "attempt_number": call_result.get("attempt_number"),
             "attempt_status": call_result.get("attempt_status"),
+            "duration_seconds": call_result.get(
+                "duration_seconds"
+            ),
             "retry": call_result.get("retry", False),
-            "success": call_result.get("success", False)
+            "success": call_result.get("success", False),
+            "crm": crm_result
         })
 
     return {

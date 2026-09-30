@@ -1,4 +1,4 @@
-import os
+docker ps -a --filter "name=ai-dialer-postgres"import os
 import time
 
 from dotenv import load_dotenv
