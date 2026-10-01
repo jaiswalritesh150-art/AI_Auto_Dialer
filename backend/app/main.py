@@ -1,8 +1,9 @@
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Body
 from contextlib import asynccontextmanager
 import asyncio
 from datetime import datetime
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 
 
 from app.database import Base, engine, get_db, SessionLocal
@@ -304,6 +305,85 @@ def get_call_attempts(
             for attempt in attempts
         ]
     }
+
+# =====================================================
+# DASHBOARD STATS
+# =====================================================
+
+@app.get("/api/v1/dashboard/stats")
+def get_dashboard_stats(
+    db: Session = Depends(get_db)
+):
+
+    total_leads = db.query(Lead).count()
+
+    total_calls = db.query(CallAttempt).count()
+
+    completed_calls = (
+        db.query(CallAttempt)
+        .filter(
+            CallAttempt.status == "completed"
+        )
+        .count()
+    )
+
+    failed_calls = (
+        db.query(CallAttempt)
+        .filter(
+            CallAttempt.status == "failed"
+        )
+        .count()
+    )
+
+    queued_calls = (
+        db.query(CallQueue)
+        .filter(
+            CallQueue.status == "queued"
+        )
+        .count()
+    )
+
+    callbacks = (
+        db.query(CallQueue)
+        .filter(
+            CallQueue.callback_status == "scheduled"
+        )
+        .count()
+    )
+
+    average_duration = (
+        db.query(
+            func.avg(
+                CallAttempt.duration_seconds
+            )
+        )
+        .filter(
+            CallAttempt.duration_seconds.isnot(None)
+        )
+        .scalar()
+    )
+
+    return {
+        "status": "success",
+        "stats": {
+            "total_leads": total_leads,
+            "total_calls": total_calls,
+            "completed_calls": completed_calls,
+            "failed_calls": failed_calls,
+            "queued_calls": queued_calls,
+            "callbacks_scheduled": callbacks,
+            "average_call_duration_seconds": (
+                round(
+                    float(average_duration),
+                    2
+                )
+                if average_duration is not None
+                else 0
+            )
+        }
+    }
+
+
 # =====================================================
 # GET CALL ATTEMPTS FOR SPECIFIC QUEUE
 # =====================================================
@@ -316,7 +396,9 @@ def get_queue_call_attempts(
 
     queue_item = (
         db.query(CallQueue)
-        .filter(CallQueue.id == queue_id)
+        .filter(
+            CallQueue.id == queue_id
+        )
         .first()
     )
 
@@ -359,7 +441,6 @@ def get_queue_call_attempts(
             for attempt in attempts
         ]
     }
-
 
 # =====================================================
 # PROCESS NEXT CALL
@@ -571,6 +652,344 @@ async def zoho_lead_webhook(
         "received_at": datetime.now().isoformat()
     }
 
+# =====================================================
+# EXOTEL CALL STATUS WEBHOOK
+# =====================================================
+
+@app.post("/api/v1/webhooks/exotel/call-status")
+async def exotel_call_status_webhook(
+    payload: dict = Body(...),
+    db: Session = Depends(get_db)
+):
+
+    print("\n" + "=" * 60)
+    print("EXOTEL CALL STATUS WEBHOOK RECEIVED")
+    print("=" * 60)
+
+    print("\n--- EXOTEL PAYLOAD ---")
+    print(payload)
+
+    # =================================================
+    # EXTRACT CALL DETAILS
+    # =================================================
+
+    call_details = payload.get(
+        "call_details",
+        {}
+    )
+
+    if not isinstance(call_details, dict):
+        call_details = {}
+
+    provider_call_id = call_details.get("sid")
+
+    call_status = (
+        call_details.get("status")
+        or call_details.get("state")
+    )
+
+    # =================================================
+    # VALIDATE PROVIDER CALL ID
+    # =================================================
+
+    if not provider_call_id:
+
+        print(
+            "\nExotel callback did not contain "
+            "a provider call ID."
+        )
+
+        return {
+            "status": "failed",
+            "message": "Exotel call SID not found",
+            "received": True
+        }
+
+    print(
+        "\nProvider Call ID:",
+        provider_call_id
+    )
+
+    print(
+        "Call Status:",
+        call_status
+    )
+
+    # =================================================
+    # FIND CALL ATTEMPT
+    # =================================================
+
+    attempt = (
+        db.query(CallAttempt)
+        .filter(
+            CallAttempt.provider == "exotel",
+            CallAttempt.provider_call_id
+            == provider_call_id
+        )
+        .first()
+    )
+
+    if not attempt:
+
+        print(
+            "\nNo matching CallAttempt found."
+        )
+
+        return {
+            "status": "failed",
+            "message": "Call attempt not found",
+            "provider_call_id": provider_call_id,
+            "received": True
+        }
+
+    # =================================================
+    # FIND QUEUE
+    # =================================================
+
+    queue_item = (
+        db.query(CallQueue)
+        .filter(
+            CallQueue.id == attempt.queue_id
+        )
+        .first()
+    )
+
+    if not queue_item:
+
+        return {
+            "status": "failed",
+            "message": "Call queue item not found",
+            "provider_call_id": provider_call_id,
+            "attempt_id": attempt.id
+        }
+
+    # =================================================
+    # NORMALIZE EXOTEL STATUS
+    # =================================================
+
+    normalized_status = (
+        str(call_status).lower().strip()
+        if call_status
+        else ""
+    )
+
+    # =================================================
+    # SUCCESSFUL TERMINAL STATES
+    # =================================================
+
+    successful_statuses = {
+        "completed",
+        "answered",
+        "success"
+    }
+
+    # =================================================
+    # FAILED TERMINAL STATES
+    # =================================================
+
+    failed_statuses = {
+        "failed",
+        "busy",
+        "no-answer",
+        "no_answer",
+        "cancelled",
+        "canceled"
+    }
+
+    # =================================================
+    # START TIME
+    # =================================================
+
+    start_time = call_details.get(
+        "start_time"
+    )
+
+    if start_time:
+        print(
+            "Exotel start time:",
+            start_time
+        )
+
+    # =================================================
+    # END TIME
+    # =================================================
+
+    end_time = call_details.get(
+        "end_time"
+    )
+
+    if end_time:
+        print(
+            "Exotel end time:",
+            end_time
+        )
+
+    # =================================================
+    # TALK TIME / DURATION
+    # =================================================
+
+    total_talk_time = call_details.get(
+        "total_talk_time"
+    )
+
+    if total_talk_time is not None:
+
+        try:
+
+            attempt.duration_seconds = int(
+                float(total_talk_time)
+            )
+
+        except (
+            TypeError,
+            ValueError
+        ):
+
+            pass
+
+    # =================================================
+    # RECORDING
+    # =================================================
+
+    recordings = call_details.get(
+        "recordings"
+    )
+
+    if recordings:
+
+        if isinstance(
+            recordings,
+            list
+        ) and len(recordings) > 0:
+
+            first_recording = recordings[0]
+
+            if isinstance(
+                first_recording,
+                dict
+            ):
+
+                recording_url = (
+                    first_recording.get("url")
+                )
+
+                if recording_url:
+
+                    attempt.recording_url = (
+                        recording_url
+                    )
+
+    # =================================================
+    # UPDATE ATTEMPT
+    # =================================================
+
+    attempt.result = (
+        normalized_status
+        or "unknown"
+    )
+
+    # =================================================
+    # FAILED CALL
+    # =================================================
+
+    if normalized_status in failed_statuses:
+
+        attempt.status = "failed"
+
+        attempt.failure_reason = (
+            normalized_status
+        )
+
+        queue_item.status = "failed"
+
+    # =================================================
+    # SUCCESSFUL CALL
+    # =================================================
+
+    elif normalized_status in successful_statuses:
+
+        attempt.status = "completed"
+
+        attempt.failure_reason = None
+
+        queue_item.status = "completed"
+
+        queue_item.failure_reason = None
+
+    # =================================================
+    # OTHER / NON-TERMINAL STATUS
+    # =================================================
+
+    else:
+
+        print(
+            "\nNon-terminal/unknown Exotel status:",
+            normalized_status
+        )
+
+        attempt.status = (
+            normalized_status
+            or attempt.status
+        )
+
+    # =================================================
+    # COMPLETION TIME
+    # =================================================
+
+    if normalized_status in (
+        successful_statuses
+        | failed_statuses
+    ):
+
+        now = datetime.utcnow()
+
+        attempt.ended_at = now
+
+        queue_item.completed_at = now
+
+    # =================================================
+    # SAVE DATABASE
+    # =================================================
+
+    db.commit()
+
+    db.refresh(attempt)
+    db.refresh(queue_item)
+
+    # =================================================
+    # RESPONSE
+    # =================================================
+
+    print("\n--- DATABASE UPDATED ---")
+    print(
+        "Attempt ID:",
+        attempt.id
+    )
+    print(
+        "Attempt Status:",
+        attempt.status
+    )
+    print(
+        "Queue Status:",
+        queue_item.status
+    )
+    print("=" * 60 + "\n")
+
+    return {
+        "status": "success",
+        "message": (
+            "Exotel call status processed successfully"
+        ),
+        "provider": "exotel",
+        "provider_call_id": provider_call_id,
+        "attempt_id": attempt.id,
+        "queue_id": queue_item.id,
+        "call_status": normalized_status,
+        "attempt_status": attempt.status,
+        "queue_status": queue_item.status,
+        "duration_seconds": attempt.duration_seconds,
+        "recording_url": attempt.recording_url
+    }
 
 # =====================================================
 # CALL RESULT
