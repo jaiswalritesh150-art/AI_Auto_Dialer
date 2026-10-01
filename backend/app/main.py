@@ -5,8 +5,15 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
+# =====================================================
+# DATABASE
+# =====================================================
 
 from app.database import Base, engine, get_db, SessionLocal
+
+# =====================================================
+# MODELS
+# =====================================================
 
 from app.models import (
     Lead,
@@ -14,6 +21,10 @@ from app.models import (
     CallAttempt,
     CallIntelligence
 )
+
+# =====================================================
+# SCHEMAS
+# =====================================================
 
 from app.schemas.lead import LeadCreate
 from app.schemas.call import CallResultRequest
@@ -181,6 +192,77 @@ def health():
 
 
 # =====================================================
+# DASHBOARD STATS
+# =====================================================
+
+@app.get("/api/v1/dashboard/stats")
+def dashboard_stats(
+    db: Session = Depends(get_db)
+):
+
+    total_leads = db.query(Lead).count()
+
+    total_calls = db.query(CallAttempt).count()
+
+    completed_calls = (
+        db.query(CallAttempt)
+        .filter(CallAttempt.status == "completed")
+        .count()
+    )
+
+    failed_calls = (
+        db.query(CallAttempt)
+        .filter(CallAttempt.status.in_([
+            "failed",
+            "busy",
+            "no-answer",
+            "no_answer",
+            "cancelled",
+            "canceled"
+        ]))
+        .count()
+    )
+
+    queued_calls = (
+        db.query(CallQueue)
+        .filter(CallQueue.status == "queued")
+        .count()
+    )
+
+    callbacks_scheduled = (
+        db.query(CallQueue)
+        .filter(
+            CallQueue.callback_at.isnot(None),
+            CallQueue.callback_status == "scheduled"
+        )
+        .count()
+    )
+
+    average_duration = (
+        db.query(func.avg(CallAttempt.duration_seconds))
+        .filter(CallAttempt.duration_seconds.isnot(None))
+        .scalar()
+    )
+
+    return {
+        "status": "success",
+        "stats": {
+            "total_leads": total_leads,
+            "total_calls": total_calls,
+            "completed_calls": completed_calls,
+            "failed_calls": failed_calls,
+            "queued_calls": queued_calls,
+            "callbacks_scheduled": callbacks_scheduled,
+            "average_call_duration_seconds": (
+                round(float(average_duration), 2)
+                if average_duration is not None
+                else 0
+            )
+        }
+    }
+
+
+# =====================================================
 # GET ALL LEADS
 # =====================================================
 
@@ -253,8 +335,10 @@ def get_call_queue(
             for item in queue_items
         ]
     }
+
+
 # =====================================================
-# GET ALL CALL ATTEMPTS / CALL HISTORY
+# GET ALL CALL ATTEMPTS
 # =====================================================
 
 @app.get("/api/v1/call-attempts")
@@ -276,111 +360,16 @@ def get_call_attempts(
                 "id": attempt.id,
                 "queue_id": attempt.queue_id,
                 "attempt_number": attempt.attempt_number,
-
-                # Call status
                 "status": attempt.status,
-                "result": attempt.result,
-                "failure_reason": attempt.failure_reason,
-
-                # Timing
                 "started_at": attempt.started_at,
                 "ended_at": attempt.ended_at,
-                "duration_seconds": attempt.duration_seconds,
-
-                # Telephony
+                "result": attempt.result,
+                "failure_reason": attempt.failure_reason,
                 "provider": attempt.provider,
-                "provider_call_id": attempt.provider_call_id,
-                "recording_url": attempt.recording_url,
-                "recording_reference": attempt.recording_reference,
-
-                # Human agent / transfer
-                "transfer_status": attempt.transfer_status,
-                "agent_id": attempt.agent_id,
-
-                # Customer information
-                "customer_intent": attempt.customer_intent,
-                "customer_notes": attempt.customer_notes,
-                "next_action": attempt.next_action
+                "provider_call_id": attempt.provider_call_id
             }
             for attempt in attempts
         ]
-    }
-
-# =====================================================
-# DASHBOARD STATS
-# =====================================================
-
-@app.get("/api/v1/dashboard/stats")
-def get_dashboard_stats(
-    db: Session = Depends(get_db)
-):
-
-    total_leads = db.query(Lead).count()
-
-    total_calls = db.query(CallAttempt).count()
-
-    completed_calls = (
-        db.query(CallAttempt)
-        .filter(
-            CallAttempt.status == "completed"
-        )
-        .count()
-    )
-
-    failed_calls = (
-        db.query(CallAttempt)
-        .filter(
-            CallAttempt.status == "failed"
-        )
-        .count()
-    )
-
-    queued_calls = (
-        db.query(CallQueue)
-        .filter(
-            CallQueue.status == "queued"
-        )
-        .count()
-    )
-
-    callbacks = (
-        db.query(CallQueue)
-        .filter(
-            CallQueue.callback_status == "scheduled"
-        )
-        .count()
-    )
-
-    average_duration = (
-        db.query(
-            func.avg(
-                CallAttempt.duration_seconds
-            )
-        )
-        .filter(
-            CallAttempt.duration_seconds.isnot(None)
-        )
-        .scalar()
-    )
-
-    return {
-        "status": "success",
-        "stats": {
-            "total_leads": total_leads,
-            "total_calls": total_calls,
-            "completed_calls": completed_calls,
-            "failed_calls": failed_calls,
-            "queued_calls": queued_calls,
-            "callbacks_scheduled": callbacks,
-            "average_call_duration_seconds": (
-                round(
-                    float(average_duration),
-                    2
-                )
-                if average_duration is not None
-                else 0
-            )
-        }
     }
 
 
@@ -396,9 +385,7 @@ def get_queue_call_attempts(
 
     queue_item = (
         db.query(CallQueue)
-        .filter(
-            CallQueue.id == queue_id
-        )
+        .filter(CallQueue.id == queue_id)
         .first()
     )
 
@@ -441,6 +428,7 @@ def get_queue_call_attempts(
             for attempt in attempts
         ]
     }
+
 
 # =====================================================
 # PROCESS NEXT CALL
@@ -652,6 +640,7 @@ async def zoho_lead_webhook(
         "received_at": datetime.now().isoformat()
     }
 
+
 # =====================================================
 # EXOTEL CALL STATUS WEBHOOK
 # =====================================================
@@ -666,75 +655,31 @@ async def exotel_call_status_webhook(
     print("EXOTEL CALL STATUS WEBHOOK RECEIVED")
     print("=" * 60)
 
-    print("\n--- EXOTEL PAYLOAD ---")
-    print(payload)
-
-    # =================================================
-    # EXTRACT CALL DETAILS
-    # =================================================
-
-    call_details = payload.get(
-        "call_details",
-        {}
-    )
-
-    if not isinstance(call_details, dict):
-        call_details = {}
+    call_details = payload.get("call_details") or {}
 
     provider_call_id = call_details.get("sid")
-
     call_status = (
         call_details.get("status")
         or call_details.get("state")
     )
 
-    # =================================================
-    # VALIDATE PROVIDER CALL ID
-    # =================================================
-
     if not provider_call_id:
-
-        print(
-            "\nExotel callback did not contain "
-            "a provider call ID."
-        )
-
         return {
             "status": "failed",
             "message": "Exotel call SID not found",
             "received": True
         }
 
-    print(
-        "\nProvider Call ID:",
-        provider_call_id
-    )
-
-    print(
-        "Call Status:",
-        call_status
-    )
-
-    # =================================================
-    # FIND CALL ATTEMPT
-    # =================================================
-
     attempt = (
         db.query(CallAttempt)
         .filter(
             CallAttempt.provider == "exotel",
-            CallAttempt.provider_call_id
-            == provider_call_id
+            CallAttempt.provider_call_id == provider_call_id
         )
         .first()
     )
 
     if not attempt:
-
-        print(
-            "\nNo matching CallAttempt found."
-        )
-
         return {
             "status": "failed",
             "message": "Call attempt not found",
@@ -742,50 +687,32 @@ async def exotel_call_status_webhook(
             "received": True
         }
 
-    # =================================================
-    # FIND QUEUE
-    # =================================================
-
     queue_item = (
         db.query(CallQueue)
-        .filter(
-            CallQueue.id == attempt.queue_id
-        )
+        .filter(CallQueue.id == attempt.queue_id)
         .first()
     )
 
     if not queue_item:
-
         return {
             "status": "failed",
             "message": "Call queue item not found",
             "provider_call_id": provider_call_id,
-            "attempt_id": attempt.id
+            "attempt_id": attempt.id,
+            "received": True
         }
 
-    # =================================================
-    # NORMALIZE EXOTEL STATUS
-    # =================================================
-
     normalized_status = (
-        str(call_status).lower().strip()
-        if call_status
-        else ""
+        str(call_status or "unknown")
+        .strip()
+        .lower()
     )
-
-    # =================================================
-    # SUCCESSFUL TERMINAL STATES
-    # =================================================
 
     successful_statuses = {
         "completed",
         "answered",
         "success"
     }
-
-    # =================================================
-    # FAILED TERMINAL STATES
-    # =================================================
 
     failed_statuses = {
         "failed",
@@ -800,137 +727,116 @@ async def exotel_call_status_webhook(
     # START TIME
     # =================================================
 
-    start_time = call_details.get(
-        "start_time"
-    )
+    start_time = call_details.get("start_time")
 
     if start_time:
+
         print(
             "Exotel start time:",
             start_time
         )
 
+        try:
+
+            attempt.started_at = datetime.fromisoformat(
+                str(start_time).replace("Z", "+00:00")
+            ).replace(tzinfo=None)
+
+        except (TypeError, ValueError):
+
+            print(
+                "Could not parse Exotel start_time"
+            )
+
     # =================================================
     # END TIME
     # =================================================
 
-    end_time = call_details.get(
-        "end_time"
-    )
+    end_time = call_details.get("end_time")
 
     if end_time:
+
         print(
             "Exotel end time:",
             end_time
         )
 
+        try:
+
+            attempt.ended_at = datetime.fromisoformat(
+                str(end_time).replace("Z", "+00:00")
+            ).replace(tzinfo=None)
+
+        except (TypeError, ValueError):
+
+            print(
+                "Could not parse Exotel end_time"
+            )
+
     # =================================================
-    # TALK TIME / DURATION
+    # DURATION
     # =================================================
 
-    total_talk_time = call_details.get(
-        "total_talk_time"
-    )
+    total_talk_time = call_details.get("total_talk_time")
 
     if total_talk_time is not None:
 
         try:
-
             attempt.duration_seconds = int(
                 float(total_talk_time)
             )
+        except (TypeError, ValueError):
+            print("Could not parse Exotel total_talk_time")
 
-        except (
-            TypeError,
-            ValueError
-        ):
+    elif attempt.started_at and attempt.ended_at:
 
-            pass
+        attempt.duration_seconds = int(
+            (attempt.ended_at - attempt.started_at).total_seconds()
+        )
 
     # =================================================
     # RECORDING
     # =================================================
 
-    recordings = call_details.get(
-        "recordings"
-    )
+    recordings = call_details.get("recordings") or []
 
-    if recordings:
+    if isinstance(recordings, list):
 
-        if isinstance(
-            recordings,
-            list
-        ) and len(recordings) > 0:
+        for recording in recordings:
 
-            first_recording = recordings[0]
+            if isinstance(recording, dict):
 
-            if isinstance(
-                first_recording,
-                dict
-            ):
-
-                recording_url = (
-                    first_recording.get("url")
-                )
+                recording_url = recording.get("url")
 
                 if recording_url:
-
-                    attempt.recording_url = (
-                        recording_url
-                    )
+                    attempt.recording_url = recording_url
+                    break
 
     # =================================================
-    # UPDATE ATTEMPT
+    # STATUS UPDATE
     # =================================================
 
-    attempt.result = (
-        normalized_status
-        or "unknown"
-    )
-
-    # =================================================
-    # FAILED CALL
-    # =================================================
-
-    if normalized_status in failed_statuses:
-
-        attempt.status = "failed"
-
-        attempt.failure_reason = (
-            normalized_status
-        )
-
-        queue_item.status = "failed"
-
-    # =================================================
-    # SUCCESSFUL CALL
-    # =================================================
-
-    elif normalized_status in successful_statuses:
+    if normalized_status in successful_statuses:
 
         attempt.status = "completed"
-
+        attempt.result = "answered"
         attempt.failure_reason = None
 
         queue_item.status = "completed"
-
         queue_item.failure_reason = None
 
-    # =================================================
-    # OTHER / NON-TERMINAL STATUS
-    # =================================================
+    elif normalized_status in failed_statuses:
+
+        attempt.status = normalized_status
+        attempt.result = normalized_status
+        attempt.failure_reason = normalized_status
+
+        queue_item.status = normalized_status
+        queue_item.failure_reason = normalized_status
 
     else:
 
-        print(
-            "\nNon-terminal/unknown Exotel status:",
-            normalized_status
-        )
-
-        attempt.status = (
-            normalized_status
-            or attempt.status
-        )
+        attempt.status = normalized_status
 
     # =================================================
     # COMPLETION TIME
@@ -943,43 +849,22 @@ async def exotel_call_status_webhook(
 
         now = datetime.utcnow()
 
-        attempt.ended_at = now
-
         queue_item.completed_at = now
-
-    # =================================================
-    # SAVE DATABASE
-    # =================================================
 
     db.commit()
 
     db.refresh(attempt)
     db.refresh(queue_item)
 
-    # =================================================
-    # RESPONSE
-    # =================================================
-
-    print("\n--- DATABASE UPDATED ---")
-    print(
-        "Attempt ID:",
-        attempt.id
-    )
-    print(
-        "Attempt Status:",
-        attempt.status
-    )
-    print(
-        "Queue Status:",
-        queue_item.status
-    )
-    print("=" * 60 + "\n")
+    print("Exotel webhook processed successfully")
+    print("Provider Call ID:", provider_call_id)
+    print("Attempt ID:", attempt.id)
+    print("Queue ID:", queue_item.id)
+    print("Status:", normalized_status)
 
     return {
         "status": "success",
-        "message": (
-            "Exotel call status processed successfully"
-        ),
+        "message": "Exotel call status processed successfully",
         "provider": "exotel",
         "provider_call_id": provider_call_id,
         "attempt_id": attempt.id,
@@ -990,6 +875,7 @@ async def exotel_call_status_webhook(
         "duration_seconds": attempt.duration_seconds,
         "recording_url": attempt.recording_url
     }
+
 
 # =====================================================
 # CALL RESULT
@@ -1081,7 +967,6 @@ def initiate_telephony_call(
         )
 
     if attempt.provider_call_id:
-
         return {
             "success": True,
             "queue_id": queue_item.id,
@@ -1105,6 +990,8 @@ def initiate_telephony_call(
             status_code=400,
             detail=call.get("message")
         )
+
+    # Save telephony provider details
 
     attempt.provider = call.get("provider")
     attempt.provider_call_id = call.get(
@@ -1148,26 +1035,39 @@ def telephony_end_call(
         call_id
     )
 
+
 # =====================================================
 # CALL INTELLIGENCE
 # =====================================================
+
 @app.post("/api/v1/call-intelligence")
 def create_call_intelligence(
     request: CallIntelligenceRequest,
     db: Session = Depends(get_db)
 ):
 
+    # =================================================
+    # FIND QUEUE
+    # =================================================
+
     queue_item = (
         db.query(CallQueue)
-        .filter(CallQueue.id == request.queue_id)
+        .filter(
+            CallQueue.id == request.queue_id
+        )
         .first()
     )
 
     if not queue_item:
+
         raise HTTPException(
             status_code=404,
             detail="Call queue item not found"
         )
+
+    # =================================================
+    # FIND ATTEMPT
+    # =================================================
 
     attempt = (
         db.query(CallAttempt)
@@ -1179,22 +1079,15 @@ def create_call_intelligence(
     )
 
     if not attempt:
+
         raise HTTPException(
             status_code=404,
             detail="Call attempt not found"
         )
 
-    lead = (
-        db.query(Lead)
-        .filter(Lead.id == queue_item.lead_id)
-        .first()
-    )
-
-    if not lead:
-        raise HTTPException(
-            status_code=404,
-            detail="Lead not found"
-        )
+    # =================================================
+    # AI ANALYSIS
+    # =================================================
 
     try:
 
@@ -1208,6 +1101,10 @@ def create_call_intelligence(
             status_code=500,
             detail=f"AI analysis failed: {str(exc)}"
         )
+
+    # =================================================
+    # SAVE INTELLIGENCE
+    # =================================================
 
     intelligence = CallIntelligence(
         queue_id=request.queue_id,
@@ -1223,21 +1120,14 @@ def create_call_intelligence(
     db.refresh(intelligence)
 
     # =================================================
-    # UPDATE ZOHO CRM
+    # RESPONSE
     # =================================================
-
-    crm_result = update_lead_after_call(
-        zoho_lead_id=lead.zoho_lead_id,
-        outcome=analysis.get("outcome") or "answered",
-        sentiment=analysis.get("sentiment") or "neutral",
-        summary=analysis.get("summary") or ""
-    )
 
     return {
         "status": "success",
         "message": (
-            "Call intelligence analyzed, saved "
-            "and CRM updated successfully"
+            "Call intelligence analyzed and "
+            "saved successfully"
         ),
         "call_intelligence": {
             "id": intelligence.id,
@@ -1248,10 +1138,10 @@ def create_call_intelligence(
             "sentiment": intelligence.sentiment,
             "outcome": intelligence.outcome,
             "analyzed_at": intelligence.analyzed_at
-        },
-        "crm": crm_result
+        }
     }
-    
+
+
 # =====================================================
 # AI CALLING
 # =====================================================
@@ -1261,6 +1151,10 @@ def ai_call(
     queue_id: int,
     db: Session = Depends(get_db)
 ):
+
+    # =================================================
+    # FIND QUEUE
+    # =================================================
 
     queue_item = (
         db.query(CallQueue)
@@ -1277,6 +1171,10 @@ def ai_call(
             detail="Call queue item not found"
         )
 
+    # =================================================
+    # FIND LEAD
+    # =================================================
+
     lead = (
         db.query(Lead)
         .filter(
@@ -1291,6 +1189,10 @@ def ai_call(
             status_code=404,
             detail="Lead not found"
         )
+
+    # =================================================
+    # FIND LATEST ATTEMPT
+    # =================================================
 
     attempt = (
         db.query(CallAttempt)
@@ -1309,6 +1211,10 @@ def ai_call(
             status_code=400,
             detail="No call attempt found"
         )
+
+    # =================================================
+    # INITIATE SIMULATED CALL
+    # =================================================
 
     if attempt.provider_call_id:
 
@@ -1343,7 +1249,7 @@ def ai_call(
 
         db.commit()
         db.refresh(attempt)
-
+         
     # =================================================
     # LEAD CONTEXT
     # =================================================
@@ -1386,6 +1292,10 @@ def ai_call(
             status_code=500,
             detail=f"AI calling failed: {str(exc)}"
         )
+
+    # =================================================
+    # RESPONSE
+    # =================================================
 
     return {
         "status": "success",
@@ -1480,11 +1390,9 @@ def ai_call_message(
     # =================================================
     # CONVERSATION
     # =================================================
-
     conversation = list(
         request.conversation
     )
-
     # Load previous conversation from latest intelligence
     previous_intelligence = (
         db.query(CallIntelligence)
@@ -1497,15 +1405,9 @@ def ai_call_message(
         )
         .first()
     )
+    if previous_intelligence and previous_intelligence.transcript:
 
-    if (
-        previous_intelligence
-        and previous_intelligence.transcript
-    ):
-
-        previous_lines = (
-            previous_intelligence.transcript.split("\n")
-        )
+        previous_lines = previous_intelligence.transcript.split("\n")
 
         conversation = []
 
@@ -1685,7 +1587,6 @@ def ai_call_message(
     # AUTOMATIC CALLBACK SCHEDULING
     # =================================================
 
-    crm_result = None
     callback_scheduled = False
     callback_at = None
 
@@ -1713,22 +1614,6 @@ def ai_call_message(
                 False
             )
 
-            # =================================================
-            # UPDATE CRM FOR CALLBACK
-            # =================================================
-
-            crm_result = update_lead_after_call(
-                zoho_lead_id=lead.zoho_lead_id,
-                outcome="callback_requested",
-                sentiment=(
-                    analysis.get("sentiment")
-                    or "neutral"
-                ),
-                summary=(
-                    analysis.get("summary")
-                    or ""
-                )
-            )
     # =================================================
     # CALL END CONTROL
     # =================================================
@@ -1779,6 +1664,10 @@ def ai_call_message(
         db.refresh(queue_item)
 
         call_ended = True
+
+    else:
+
+        crm_result = None
 
     # =================================================
     # RESPONSE
@@ -2036,3 +1925,4 @@ def schedule_callback_endpoint(
     )
 
     return result
+
