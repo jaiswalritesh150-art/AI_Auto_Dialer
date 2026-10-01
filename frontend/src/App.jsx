@@ -20,6 +20,9 @@ function StatusBadge({ status }) {
     calling: "bg-blue-50 text-blue-700",
     initiated: "bg-blue-50 text-blue-700",
     in_progress: "bg-blue-50 text-blue-700",
+    scheduled: "bg-purple-50 text-purple-700",
+    pending: "bg-amber-50 text-amber-700",
+    processed: "bg-emerald-50 text-emerald-700",
   };
 
   return (
@@ -73,25 +76,21 @@ function DashboardPage({ stats, leads, calls, loading }) {
               value={stats?.total_leads ?? 0}
               subtitle="Leads in CRM"
             />
-
             <StatCard
               title="Total Calls"
               value={stats?.total_calls ?? 0}
               subtitle="Call attempts"
             />
-
             <StatCard
               title="Completed"
               value={stats?.completed_calls ?? 0}
               subtitle="Successful calls"
             />
-
             <StatCard
               title="Failed"
               value={stats?.failed_calls ?? 0}
               subtitle="Failed attempts"
             />
-
             <StatCard
               title="Avg. Duration"
               value={`${stats?.average_call_duration_seconds ?? 0}s`}
@@ -399,28 +398,82 @@ function CallHistoryPage({ calls, loading }) {
   );
 }
 
-function CallbacksPage({ leads }) {
+function CallbacksPage({ queue, loading }) {
+  const callbacks = queue.filter(
+    (item) => item.callback_at || item.callback_status
+  );
+
   return (
     <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-      <div className="border-b border-slate-200 px-6 py-5">
-        <h3 className="text-lg font-bold">Callbacks</h3>
-        <p className="mt-1 text-sm text-slate-500">
-          Scheduled callbacks and follow-up activity
-        </p>
-      </div>
-
-      <div className="p-6">
-        <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center">
-          <p className="text-sm font-semibold text-slate-700">
-            Callback management
-          </p>
-
-          <p className="mt-2 text-sm text-slate-500">
-            {leads.length > 0
-              ? "Callback scheduling is handled by the backend callback worker."
-              : "No callback data available."}
+      <div className="flex items-center justify-between border-b border-slate-200 px-6 py-5">
+        <div>
+          <h3 className="text-lg font-bold">Callbacks</h3>
+          <p className="mt-1 text-sm text-slate-500">
+            Scheduled callbacks and follow-up activity
           </p>
         </div>
+
+        <span className="rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-600">
+          {callbacks.length} scheduled
+        </span>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[850px] text-left">
+          <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+            <tr>
+              <th className="px-6 py-3">Queue</th>
+              <th className="px-6 py-3">Lead ID</th>
+              <th className="px-6 py-3">Phone</th>
+              <th className="px-6 py-3">Callback Time</th>
+              <th className="px-6 py-3">Callback Status</th>
+              <th className="px-6 py-3">Queue Status</th>
+            </tr>
+          </thead>
+
+          <tbody className="divide-y divide-slate-100">
+            {callbacks.map((item) => (
+              <tr key={item.id} className="hover:bg-slate-50">
+                <td className="px-6 py-4 font-semibold">
+                  #{item.id}
+                </td>
+
+                <td className="px-6 py-4 text-sm text-slate-600">
+                  #{item.lead_id}
+                </td>
+
+                <td className="px-6 py-4 text-sm text-slate-600">
+                  {item.phone || "—"}
+                </td>
+
+                <td className="px-6 py-4 text-sm text-slate-600">
+                  {item.callback_at
+                    ? new Date(item.callback_at).toLocaleString()
+                    : "—"}
+                </td>
+
+                <td className="px-6 py-4">
+                  <StatusBadge status={item.callback_status} />
+                </td>
+
+                <td className="px-6 py-4">
+                  <StatusBadge status={item.status} />
+                </td>
+              </tr>
+            ))}
+
+            {!loading && callbacks.length === 0 && (
+              <tr>
+                <td
+                  colSpan="6"
+                  className="px-6 py-10 text-center text-sm text-slate-500"
+                >
+                  No callbacks scheduled
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
       </div>
     </section>
   );
@@ -432,6 +485,7 @@ function App() {
   const [stats, setStats] = useState(null);
   const [leads, setLeads] = useState([]);
   const [calls, setCalls] = useState([]);
+  const [queue, setQueue] = useState([]);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -440,23 +494,32 @@ function App() {
     try {
       setError("");
 
-      const [statsRes, leadsRes, callsRes] = await Promise.all([
-        fetch(`${API_BASE}/api/v1/dashboard/stats`),
-        fetch(`${API_BASE}/api/v1/leads`),
-        fetch(`${API_BASE}/api/v1/call-attempts`),
-      ]);
+      const [statsRes, leadsRes, callsRes, queueRes] =
+        await Promise.all([
+          fetch(`${API_BASE}/api/v1/dashboard/stats`),
+          fetch(`${API_BASE}/api/v1/leads`),
+          fetch(`${API_BASE}/api/v1/call-attempts`),
+          fetch(`${API_BASE}/api/v1/call-queue`),
+        ]);
 
-      if (!statsRes.ok || !leadsRes.ok || !callsRes.ok) {
+      if (
+        !statsRes.ok ||
+        !leadsRes.ok ||
+        !callsRes.ok ||
+        !queueRes.ok
+      ) {
         throw new Error("Failed to load dashboard data");
       }
 
       const statsData = await statsRes.json();
       const leadsData = await leadsRes.json();
       const callsData = await callsRes.json();
+      const queueData = await queueRes.json();
 
       setStats(statsData.stats);
       setLeads(leadsData.leads || []);
       setCalls(callsData.call_attempts || []);
+      setQueue(queueData.call_queue || queueData.queue || []);
     } catch (err) {
       setError(err.message || "Unable to connect to backend");
     } finally {
@@ -508,7 +571,7 @@ function App() {
     }
 
     if (activePage === "callbacks") {
-      return <CallbacksPage leads={leads} />;
+      return <CallbacksPage queue={queue} loading={loading} />;
     }
 
     return (
@@ -523,7 +586,6 @@ function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
-      {/* Sidebar */}
       <aside className="fixed hidden h-screen w-64 border-r border-slate-200 bg-white lg:block">
         <div className="flex h-full flex-col">
           <div className="border-b border-slate-200 px-6 py-6">
@@ -570,7 +632,6 @@ function App() {
         </div>
       </aside>
 
-      {/* Main */}
       <main className="lg:ml-64">
         <header className="border-b border-slate-200 bg-white">
           <div className="flex items-center justify-between px-6 py-5 lg:px-8">
