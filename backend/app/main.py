@@ -212,14 +212,16 @@ def dashboard_stats(
 
     failed_calls = (
         db.query(CallAttempt)
-        .filter(CallAttempt.status.in_([
-            "failed",
-            "busy",
-            "no-answer",
-            "no_answer",
-            "cancelled",
-            "canceled"
-        ]))
+        .filter(
+            CallAttempt.status.in_([
+                "failed",
+                "busy",
+                "no-answer",
+                "no_answer",
+                "cancelled",
+                "canceled"
+            ])
+        )
         .count()
     )
 
@@ -240,7 +242,9 @@ def dashboard_stats(
 
     average_duration = (
         db.query(func.avg(CallAttempt.duration_seconds))
-        .filter(CallAttempt.duration_seconds.isnot(None))
+        .filter(
+            CallAttempt.duration_seconds.isnot(None)
+        )
         .scalar()
     )
 
@@ -658,12 +662,14 @@ async def exotel_call_status_webhook(
     call_details = payload.get("call_details") or {}
 
     provider_call_id = call_details.get("sid")
+
     call_status = (
         call_details.get("status")
         or call_details.get("state")
     )
 
     if not provider_call_id:
+
         return {
             "status": "failed",
             "message": "Exotel call SID not found",
@@ -680,6 +686,7 @@ async def exotel_call_status_webhook(
     )
 
     if not attempt:
+
         return {
             "status": "failed",
             "message": "Call attempt not found",
@@ -689,11 +696,14 @@ async def exotel_call_status_webhook(
 
     queue_item = (
         db.query(CallQueue)
-        .filter(CallQueue.id == attempt.queue_id)
+        .filter(
+            CallQueue.id == attempt.queue_id
+        )
         .first()
     )
 
     if not queue_item:
+
         return {
             "status": "failed",
             "message": "Call queue item not found",
@@ -739,7 +749,10 @@ async def exotel_call_status_webhook(
         try:
 
             attempt.started_at = datetime.fromisoformat(
-                str(start_time).replace("Z", "+00:00")
+                str(start_time).replace(
+                    "Z",
+                    "+00:00"
+                )
             ).replace(tzinfo=None)
 
         except (TypeError, ValueError):
@@ -764,7 +777,10 @@ async def exotel_call_status_webhook(
         try:
 
             attempt.ended_at = datetime.fromisoformat(
-                str(end_time).replace("Z", "+00:00")
+                str(end_time).replace(
+                    "Z",
+                    "+00:00"
+                )
             ).replace(tzinfo=None)
 
         except (TypeError, ValueError):
@@ -777,28 +793,40 @@ async def exotel_call_status_webhook(
     # DURATION
     # =================================================
 
-    total_talk_time = call_details.get("total_talk_time")
+    total_talk_time = call_details.get(
+        "total_talk_time"
+    )
 
     if total_talk_time is not None:
 
         try:
+
             attempt.duration_seconds = int(
                 float(total_talk_time)
             )
+
         except (TypeError, ValueError):
-            print("Could not parse Exotel total_talk_time")
+
+            print(
+                "Could not parse Exotel total_talk_time"
+            )
 
     elif attempt.started_at and attempt.ended_at:
 
         attempt.duration_seconds = int(
-            (attempt.ended_at - attempt.started_at).total_seconds()
+            (
+                attempt.ended_at
+                - attempt.started_at
+            ).total_seconds()
         )
 
     # =================================================
     # RECORDING
     # =================================================
 
-    recordings = call_details.get("recordings") or []
+    recordings = call_details.get(
+        "recordings"
+    ) or []
 
     if isinstance(recordings, list):
 
@@ -806,9 +834,12 @@ async def exotel_call_status_webhook(
 
             if isinstance(recording, dict):
 
-                recording_url = recording.get("url")
+                recording_url = recording.get(
+                    "url"
+                )
 
                 if recording_url:
+
                     attempt.recording_url = recording_url
                     break
 
@@ -856,15 +887,35 @@ async def exotel_call_status_webhook(
     db.refresh(attempt)
     db.refresh(queue_item)
 
-    print("Exotel webhook processed successfully")
-    print("Provider Call ID:", provider_call_id)
-    print("Attempt ID:", attempt.id)
-    print("Queue ID:", queue_item.id)
-    print("Status:", normalized_status)
+    print(
+        "Exotel webhook processed successfully"
+    )
+
+    print(
+        "Provider Call ID:",
+        provider_call_id
+    )
+
+    print(
+        "Attempt ID:",
+        attempt.id
+    )
+
+    print(
+        "Queue ID:",
+        queue_item.id
+    )
+
+    print(
+        "Status:",
+        normalized_status
+    )
 
     return {
         "status": "success",
-        "message": "Exotel call status processed successfully",
+        "message": (
+            "Exotel call status processed successfully"
+        ),
         "provider": "exotel",
         "provider_call_id": provider_call_id,
         "attempt_id": attempt.id,
@@ -967,6 +1018,7 @@ def initiate_telephony_call(
         )
 
     if attempt.provider_call_id:
+
         return {
             "success": True,
             "queue_id": queue_item.id,
@@ -984,21 +1036,49 @@ def initiate_telephony_call(
         attempt_id=attempt.id
     )
 
+    # =================================================
+    # HANDLE TELEPHONY FAILURE
+    # =================================================
+
     if not call.get("success"):
+
+        attempt.status = "failed"
+
+        attempt.failure_reason = (
+            call.get("message")
+            or call.get("response")
+            or "Telephony call failed"
+        )
+
+        queue_item.status = "failed"
+
+        queue_item.failure_reason = (
+            attempt.failure_reason
+        )
+
+        db.commit()
+
+        db.refresh(attempt)
 
         raise HTTPException(
             status_code=400,
-            detail=call.get("message")
+            detail=attempt.failure_reason
         )
 
-    # Save telephony provider details
+    # =================================================
+    # SAVE TELEPHONY PROVIDER DETAILS
+    # =================================================
 
-    attempt.provider = call.get("provider")
+    attempt.provider = call.get(
+        "provider"
+    )
+
     attempt.provider_call_id = call.get(
         "call_id"
     )
 
     db.commit()
+
     db.refresh(attempt)
 
     return {
@@ -1116,7 +1196,9 @@ def create_call_intelligence(
     )
 
     db.add(intelligence)
+
     db.commit()
+
     db.refresh(intelligence)
 
     # =================================================
@@ -1213,43 +1295,56 @@ def ai_call(
         )
 
     # =================================================
-    # INITIATE SIMULATED CALL
+    # INITIATE CALL
     # =================================================
 
-    if attempt.provider_call_id:
+    call = initiate_call(
+        phone=queue_item.phone,
+        queue_id=queue_item.id,
+        attempt_id=attempt.id
+    )
 
-        call = {
-            "success": True,
-            "provider": attempt.provider,
-            "call_id": attempt.provider_call_id,
-            "queue_id": queue_item.id,
-            "attempt_id": attempt.id,
-            "phone": queue_item.phone,
-            "status": attempt.status,
-            "message": "Existing call reused"
-        }
+    # =================================================
+    # HANDLE TELEPHONY FAILURE
+    # =================================================
 
-    else:
+    if not call.get("success"):
 
-        call = initiate_call(
-            phone=queue_item.phone,
-            queue_id=queue_item.id,
-            attempt_id=attempt.id
+        attempt.status = "failed"
+
+        attempt.failure_reason = (
+            call.get("message")
+            or call.get("response")
+            or "Telephony call failed"
         )
 
-        if not call.get("success"):
+        queue_item.status = "failed"
 
-            raise HTTPException(
-                status_code=400,
-                detail=call.get("message")
-            )
-
-        attempt.provider = call.get("provider")
-        attempt.provider_call_id = call.get("call_id")
+        queue_item.failure_reason = (
+            attempt.failure_reason
+        )
 
         db.commit()
+
         db.refresh(attempt)
-         
+
+        raise HTTPException(
+            status_code=400,
+            detail=attempt.failure_reason
+        )
+
+    attempt.provider = call.get(
+        "provider"
+    )
+
+    attempt.provider_call_id = call.get(
+        "call_id"
+    )
+
+    db.commit()
+
+    db.refresh(attempt)
+
     # =================================================
     # LEAD CONTEXT
     # =================================================
@@ -1390,10 +1485,13 @@ def ai_call_message(
     # =================================================
     # CONVERSATION
     # =================================================
+
     conversation = list(
         request.conversation
     )
+
     # Load previous conversation from latest intelligence
+
     previous_intelligence = (
         db.query(CallIntelligence)
         .filter(
@@ -1405,9 +1503,15 @@ def ai_call_message(
         )
         .first()
     )
-    if previous_intelligence and previous_intelligence.transcript:
 
-        previous_lines = previous_intelligence.transcript.split("\n")
+    if (
+        previous_intelligence
+        and previous_intelligence.transcript
+    ):
+
+        previous_lines = (
+            previous_intelligence.transcript.split("\n")
+        )
 
         conversation = []
 
@@ -1569,7 +1673,9 @@ def ai_call_message(
     )
 
     db.add(intelligence)
+
     db.commit()
+
     db.refresh(intelligence)
 
     # =================================================
@@ -1661,6 +1767,7 @@ def ai_call_message(
         db.commit()
 
         db.refresh(attempt)
+
         db.refresh(queue_item)
 
         call_ended = True
@@ -1859,6 +1966,7 @@ def end_ai_call(
     db.commit()
 
     db.refresh(attempt)
+
     db.refresh(queue_item)
 
     # =================================================
@@ -1925,4 +2033,3 @@ def schedule_callback_endpoint(
     )
 
     return result
-
