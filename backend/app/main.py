@@ -488,9 +488,15 @@ def process_specific_dialer_call(
 
     if result.get("success") is False:
 
+        detail = (
+            result.get("message")
+            or result.get("failure_reason")
+            or "Call could not be processed"
+        )
+
         raise HTTPException(
-            status_code=404,
-            detail=result["message"]
+            status_code=400,
+            detail=detail
         )
 
     return {
