@@ -3,12 +3,63 @@ import { useEffect, useState } from "react";
 const API_BASE =
   import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
 
+/* =========================
+   Helpers
+========================= */
+
+function formatDate(value) {
+  if (!value) return "—";
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return "—";
+  }
+
+  return date.toLocaleString();
+}
+
+function formatDuration(seconds) {
+  if (seconds === null || seconds === undefined || seconds === "") {
+    return "—";
+  }
+
+  const value = Number(seconds);
+
+  if (!Number.isFinite(value)) {
+    return "—";
+  }
+
+  if (value < 60) {
+    return `${Math.round(value)}s`;
+  }
+
+  const minutes = Math.floor(value / 60);
+  const remainingSeconds = Math.round(value % 60);
+
+  if (remainingSeconds === 0) {
+    return `${minutes}m`;
+  }
+
+  return `${minutes}m ${remainingSeconds}s`;
+}
+
+/* =========================
+   Reusable UI
+========================= */
+
 function StatCard({ title, value, subtitle }) {
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
       <p className="text-sm font-medium text-slate-500">{title}</p>
-      <p className="mt-2 text-3xl font-bold text-slate-900">{value}</p>
-      <p className="mt-1 text-xs text-slate-400">{subtitle}</p>
+
+      <p className="mt-2 text-3xl font-bold text-slate-900">
+        {value}
+      </p>
+
+      <p className="mt-1 text-xs text-slate-400">
+        {subtitle}
+      </p>
     </div>
   );
 }
@@ -24,11 +75,12 @@ function StatusBadge({ status }) {
     scheduled: "bg-purple-50 text-purple-700",
     pending: "bg-amber-50 text-amber-700",
     processed: "bg-emerald-50 text-emerald-700",
+    ready: "bg-purple-50 text-purple-700",
   };
 
   return (
     <span
-      className={`rounded-full px-3 py-1 text-xs font-semibold ${
+      className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${
         styles[status] || "bg-slate-100 text-slate-600"
       }`}
     >
@@ -46,7 +98,7 @@ function PriorityBadge({ priority }) {
 
   return (
     <span
-      className={`rounded-full px-3 py-1 text-xs font-semibold ${
+      className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${
         styles[priority] || "bg-slate-100 text-slate-600"
       }`}
     >
@@ -55,12 +107,25 @@ function PriorityBadge({ priority }) {
   );
 }
 
+/* =========================
+   Dashboard
+========================= */
+
 function DashboardPage({ stats, leads, calls, loading }) {
+  const recentLeads = [...leads]
+    .sort((a, b) => Number(b.id || 0) - Number(a.id || 0))
+    .slice(0, 8);
+
+  const recentCalls = [...calls]
+    .sort((a, b) => Number(b.id || 0) - Number(a.id || 0))
+    .slice(0, 8);
+
   return (
     <div className="space-y-8">
       <section>
         <div className="mb-4">
           <h3 className="text-lg font-bold">Overview</h3>
+
           <p className="text-sm text-slate-500">
             Current system performance
           </p>
@@ -77,34 +142,43 @@ function DashboardPage({ stats, leads, calls, loading }) {
               value={stats?.total_leads ?? 0}
               subtitle="Leads in CRM"
             />
+
             <StatCard
               title="Total Calls"
               value={stats?.total_calls ?? 0}
               subtitle="Call attempts"
             />
+
             <StatCard
               title="Completed"
               value={stats?.completed_calls ?? 0}
               subtitle="Successful calls"
             />
+
             <StatCard
               title="Failed"
               value={stats?.failed_calls ?? 0}
               subtitle="Failed attempts"
             />
+
             <StatCard
               title="Avg. Duration"
-              value={`${stats?.average_call_duration_seconds ?? 0}s`}
+              value={formatDuration(
+                stats?.average_call_duration_seconds
+              )}
               subtitle="Average talk time"
             />
           </div>
         )}
       </section>
 
+      {/* Recent Leads */}
+
       <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="flex items-center justify-between border-b border-slate-200 px-6 py-5">
           <div>
             <h3 className="font-bold">Recent Leads</h3>
+
             <p className="mt-1 text-sm text-slate-500">
               Latest leads received from CRM
             </p>
@@ -128,12 +202,16 @@ function DashboardPage({ stats, leads, calls, loading }) {
             </thead>
 
             <tbody className="divide-y divide-slate-100">
-              {leads.slice(0, 8).map((lead) => (
-                <tr key={lead.id} className="hover:bg-slate-50">
+              {recentLeads.map((lead) => (
+                <tr
+                  key={lead.id}
+                  className="transition hover:bg-slate-50"
+                >
                   <td className="px-6 py-4">
                     <p className="font-semibold">
                       {lead.first_name} {lead.last_name}
                     </p>
+
                     <p className="text-xs text-slate-500">
                       {lead.email || "—"}
                     </p>
@@ -174,9 +252,12 @@ function DashboardPage({ stats, leads, calls, loading }) {
         </div>
       </section>
 
+      {/* Recent Calls */}
+
       <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-200 px-6 py-5">
           <h3 className="font-bold">Recent Call Attempts</h3>
+
           <p className="mt-1 text-sm text-slate-500">
             Latest activity from the dialer
           </p>
@@ -195,9 +276,14 @@ function DashboardPage({ stats, leads, calls, loading }) {
             </thead>
 
             <tbody className="divide-y divide-slate-100">
-              {calls.slice(0, 8).map((call) => (
-                <tr key={call.id} className="hover:bg-slate-50">
-                  <td className="px-6 py-4 font-semibold">#{call.id}</td>
+              {recentCalls.map((call) => (
+                <tr
+                  key={call.id}
+                  className="transition hover:bg-slate-50"
+                >
+                  <td className="px-6 py-4 font-semibold">
+                    #{call.id}
+                  </td>
 
                   <td className="px-6 py-4 text-sm text-slate-600">
                     #{call.queue_id}
@@ -212,7 +298,9 @@ function DashboardPage({ stats, leads, calls, loading }) {
                   </td>
 
                   <td className="px-6 py-4 text-sm text-slate-600">
-                    {call.result || call.failure_reason || "—"}
+                    {call.result ||
+                      call.failure_reason ||
+                      "—"}
                   </td>
                 </tr>
               ))}
@@ -235,12 +323,21 @@ function DashboardPage({ stats, leads, calls, loading }) {
   );
 }
 
+/* =========================
+   Leads
+========================= */
+
 function LeadsPage({ leads, loading }) {
+  const sortedLeads = [...leads].sort(
+    (a, b) => Number(b.id || 0) - Number(a.id || 0)
+  );
+
   return (
     <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
       <div className="flex items-center justify-between border-b border-slate-200 px-6 py-5">
         <div>
           <h3 className="text-lg font-bold">All Leads</h3>
+
           <p className="mt-1 text-sm text-slate-500">
             Leads received from Zoho CRM
           </p>
@@ -267,8 +364,11 @@ function LeadsPage({ leads, loading }) {
           </thead>
 
           <tbody className="divide-y divide-slate-100">
-            {leads.map((lead) => (
-              <tr key={lead.id} className="hover:bg-slate-50">
+            {sortedLeads.map((lead) => (
+              <tr
+                key={lead.id}
+                className="transition hover:bg-slate-50"
+              >
                 <td className="px-6 py-4 text-sm font-semibold">
                   #{lead.id}
                 </td>
@@ -277,6 +377,7 @@ function LeadsPage({ leads, loading }) {
                   <p className="font-semibold">
                     {lead.first_name} {lead.last_name}
                   </p>
+
                   <p className="text-xs text-slate-500">
                     {lead.email || "—"}
                   </p>
@@ -325,18 +426,223 @@ function LeadsPage({ leads, loading }) {
   );
 }
 
+/* =========================
+   Call Queue
+========================= */
+
+function CallQueuePage({ queue, loading }) {
+  const sortedQueue = [...queue].sort(
+    (a, b) => Number(b.id || 0) - Number(a.id || 0)
+  );
+
+  const total = queue.length;
+
+  const queued = queue.filter(
+    (item) => item.status === "queued"
+  ).length;
+
+  const calling = queue.filter(
+    (item) => item.status === "calling"
+  ).length;
+
+  const completed = queue.filter(
+    (item) => item.status === "completed"
+  ).length;
+
+  const failed = queue.filter(
+    (item) => item.status === "failed"
+  ).length;
+
+  const callbacks = queue.filter(
+    (item) => item.callback_at || item.callback_status
+  ).length;
+
+  return (
+    <div className="space-y-6">
+      {/* Queue Summary */}
+
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
+        <StatCard
+          title="Total Queue"
+          value={total}
+          subtitle="All queue items"
+        />
+
+        <StatCard
+          title="Queued"
+          value={queued}
+          subtitle="Waiting to process"
+        />
+
+        <StatCard
+          title="Calling"
+          value={calling}
+          subtitle="Currently active"
+        />
+
+        <StatCard
+          title="Completed"
+          value={completed}
+          subtitle="Processed successfully"
+        />
+
+        <StatCard
+          title="Failed"
+          value={failed}
+          subtitle="Failed queue items"
+        />
+
+        <StatCard
+          title="Callbacks"
+          value={callbacks}
+          subtitle="Scheduled follow-ups"
+        />
+      </div>
+
+      {/* Queue Table */}
+
+      <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="flex items-center justify-between border-b border-slate-200 px-6 py-5">
+          <div>
+            <h3 className="text-lg font-bold">
+              Call Queue
+            </h3>
+
+            <p className="mt-1 text-sm text-slate-500">
+              Leads waiting for or processed by the dialer
+            </p>
+          </div>
+
+          <span className="rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-600">
+            {total} queue items
+          </span>
+        </div>
+
+        {loading && queue.length === 0 ? (
+          <div className="p-10 text-center text-sm text-slate-500">
+            Loading call queue...
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[1200px] text-left">
+              <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                <tr>
+                  <th className="px-6 py-3">Queue</th>
+                  <th className="px-6 py-3">Lead</th>
+                  <th className="px-6 py-3">Phone</th>
+                  <th className="px-6 py-3">Status</th>
+                  <th className="px-6 py-3">Queued At</th>
+                  <th className="px-6 py-3">Started At</th>
+                  <th className="px-6 py-3">Completed At</th>
+                  <th className="px-6 py-3">Callback</th>
+                  <th className="px-6 py-3">Reason</th>
+                </tr>
+              </thead>
+
+              <tbody className="divide-y divide-slate-100">
+                {sortedQueue.map((item) => (
+                  <tr
+                    key={item.id}
+                    className="transition hover:bg-slate-50"
+                  >
+                    <td className="px-6 py-4 font-semibold">
+                      #{item.id}
+                    </td>
+
+                    <td className="px-6 py-4 text-sm text-slate-600">
+                      #{item.lead_id}
+                    </td>
+
+                    <td className="px-6 py-4 text-sm text-slate-600">
+                      {item.phone || "—"}
+                    </td>
+
+                    <td className="px-6 py-4">
+                      <StatusBadge status={item.status} />
+                    </td>
+
+                    <td className="px-6 py-4 text-sm text-slate-600">
+                      {formatDate(item.queued_at)}
+                    </td>
+
+                    <td className="px-6 py-4 text-sm text-slate-600">
+                      {formatDate(item.started_at)}
+                    </td>
+
+                    <td className="px-6 py-4 text-sm text-slate-600">
+                      {formatDate(item.completed_at)}
+                    </td>
+
+                    <td className="px-6 py-4">
+                      <div className="space-y-1">
+                        <p className="text-sm text-slate-600">
+                          {formatDate(item.callback_at)}
+                        </p>
+
+                        {item.callback_status && (
+                          <StatusBadge
+                            status={item.callback_status}
+                          />
+                        )}
+                      </div>
+                    </td>
+
+                    <td className="max-w-xs px-6 py-4">
+                      {item.failure_reason ? (
+                        <span className="text-sm font-medium text-red-600">
+                          {item.failure_reason}
+                        </span>
+                      ) : (
+                        <span className="text-sm text-slate-400">
+                          —
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+
+                {!loading && queue.length === 0 && (
+                  <tr>
+                    <td
+                      colSpan="9"
+                      className="px-6 py-10 text-center text-sm text-slate-500"
+                    >
+                      No call queue items found
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+/* =========================
+   Call History
+========================= */
+
 function CallHistoryPage({ calls, loading }) {
+  const sortedCalls = [...calls].sort(
+    (a, b) => Number(b.id || 0) - Number(a.id || 0)
+  );
+
   return (
     <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
       <div className="border-b border-slate-200 px-6 py-5">
-        <h3 className="text-lg font-bold">Call History</h3>
+        <h3 className="text-lg font-bold">
+          Call History
+        </h3>
+
         <p className="mt-1 text-sm text-slate-500">
           Complete dialer call activity
         </p>
       </div>
 
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[950px] text-left">
+        <table className="w-full min-w-[1000px] text-left">
           <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
             <tr>
               <th className="px-6 py-3">Attempt</th>
@@ -350,9 +656,14 @@ function CallHistoryPage({ calls, loading }) {
           </thead>
 
           <tbody className="divide-y divide-slate-100">
-            {calls.map((call) => (
-              <tr key={call.id} className="hover:bg-slate-50">
-                <td className="px-6 py-4 font-semibold">#{call.id}</td>
+            {sortedCalls.map((call) => (
+              <tr
+                key={call.id}
+                className="transition hover:bg-slate-50"
+              >
+                <td className="px-6 py-4 font-semibold">
+                  #{call.id}
+                </td>
 
                 <td className="px-6 py-4 text-sm text-slate-600">
                   #{call.queue_id}
@@ -371,13 +682,13 @@ function CallHistoryPage({ calls, loading }) {
                 </td>
 
                 <td className="px-6 py-4 text-sm text-slate-600">
-                  {call.result || call.failure_reason || "—"}
+                  {call.result ||
+                    call.failure_reason ||
+                    "—"}
                 </td>
 
                 <td className="px-6 py-4 text-sm text-slate-600">
-                  {call.duration_seconds
-                    ? `${call.duration_seconds}s`
-                    : "—"}
+                  {formatDuration(call.duration_seconds)}
                 </td>
               </tr>
             ))}
@@ -399,16 +710,30 @@ function CallHistoryPage({ calls, loading }) {
   );
 }
 
+/* =========================
+   Callbacks
+========================= */
+
 function CallbacksPage({ queue, loading }) {
-  const callbacks = queue.filter(
-    (item) => item.callback_at || item.callback_status
-  );
+  const callbacks = [...queue]
+    .filter(
+      (item) =>
+        item.callback_at || item.callback_status
+    )
+    .sort(
+      (a, b) =>
+        new Date(a.callback_at || 0).getTime() -
+        new Date(b.callback_at || 0).getTime()
+    );
 
   return (
     <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
       <div className="flex items-center justify-between border-b border-slate-200 px-6 py-5">
         <div>
-          <h3 className="text-lg font-bold">Callbacks</h3>
+          <h3 className="text-lg font-bold">
+            Callbacks
+          </h3>
+
           <p className="mt-1 text-sm text-slate-500">
             Scheduled callbacks and follow-up activity
           </p>
@@ -420,7 +745,7 @@ function CallbacksPage({ queue, loading }) {
       </div>
 
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[850px] text-left">
+        <table className="w-full min-w-[900px] text-left">
           <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
             <tr>
               <th className="px-6 py-3">Queue</th>
@@ -434,7 +759,10 @@ function CallbacksPage({ queue, loading }) {
 
           <tbody className="divide-y divide-slate-100">
             {callbacks.map((item) => (
-              <tr key={item.id} className="hover:bg-slate-50">
+              <tr
+                key={item.id}
+                className="transition hover:bg-slate-50"
+              >
                 <td className="px-6 py-4 font-semibold">
                   #{item.id}
                 </td>
@@ -448,13 +776,13 @@ function CallbacksPage({ queue, loading }) {
                 </td>
 
                 <td className="px-6 py-4 text-sm text-slate-600">
-                  {item.callback_at
-                    ? new Date(item.callback_at).toLocaleString()
-                    : "—"}
+                  {formatDate(item.callback_at)}
                 </td>
 
                 <td className="px-6 py-4">
-                  <StatusBadge status={item.callback_status} />
+                  <StatusBadge
+                    status={item.callback_status}
+                  />
                 </td>
 
                 <td className="px-6 py-4">
@@ -480,8 +808,13 @@ function CallbacksPage({ queue, loading }) {
   );
 }
 
+/* =========================
+   Main App
+========================= */
+
 function App() {
-  const [activePage, setActivePage] = useState("dashboard");
+  const [activePage, setActivePage] =
+    useState("dashboard");
 
   const [stats, setStats] = useState(null);
   const [leads, setLeads] = useState([]);
@@ -489,19 +822,29 @@ function App() {
   const [queue, setQueue] = useState([]);
 
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
+  const [lastUpdated, setLastUpdated] = useState(null);
 
-  const loadDashboard = async () => {
+  const loadDashboard = async (isManualRefresh = false) => {
     try {
+      if (isManualRefresh) {
+        setRefreshing(true);
+      }
+
       setError("");
 
-      const [statsRes, leadsRes, callsRes, queueRes] =
-        await Promise.all([
-          fetch(`${API_BASE}/api/v1/dashboard/stats`),
-          fetch(`${API_BASE}/api/v1/leads`),
-          fetch(`${API_BASE}/api/v1/call-attempts`),
-          fetch(`${API_BASE}/api/v1/call-queue`),
-        ]);
+      const [
+        statsRes,
+        leadsRes,
+        callsRes,
+        queueRes,
+      ] = await Promise.all([
+        fetch(`${API_BASE}/api/v1/dashboard/stats`),
+        fetch(`${API_BASE}/api/v1/leads`),
+        fetch(`${API_BASE}/api/v1/call-attempts`),
+        fetch(`${API_BASE}/api/v1/call-queue`),
+      ]);
 
       if (
         !statsRes.ok ||
@@ -509,7 +852,9 @@ function App() {
         !callsRes.ok ||
         !queueRes.ok
       ) {
-        throw new Error("Failed to load dashboard data");
+        throw new Error(
+          "Failed to load dashboard data"
+        );
       }
 
       const statsData = await statsRes.json();
@@ -517,62 +862,127 @@ function App() {
       const callsData = await callsRes.json();
       const queueData = await queueRes.json();
 
-      setStats(statsData.stats);
+      setStats(statsData.stats || null);
       setLeads(leadsData.leads || []);
       setCalls(callsData.call_attempts || []);
-      setQueue(queueData.call_queue || queueData.queue || []);
+      setQueue(
+        queueData.call_queue ||
+          queueData.queue ||
+          []
+      );
+
+      setLastUpdated(new Date());
     } catch (err) {
-      setError(err.message || "Unable to connect to backend");
+      setError(
+        err.message ||
+          "Unable to connect to backend"
+      );
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
 
   useEffect(() => {
     loadDashboard();
 
-    const interval = setInterval(loadDashboard, 15000);
+    const interval = setInterval(() => {
+      loadDashboard();
+    }, 15000);
 
     return () => clearInterval(interval);
   }, []);
 
   const navigation = [
-    { id: "dashboard", label: "Dashboard" },
-    { id: "leads", label: "Leads" },
-    { id: "calls", label: "Call History" },
-    { id: "callbacks", label: "Callbacks" },
+    {
+      id: "dashboard",
+      label: "Dashboard",
+    },
+    {
+      id: "leads",
+      label: "Leads",
+    },
+    {
+      id: "queue",
+      label: "Call Queue",
+    },
+    {
+      id: "calls",
+      label: "Call History",
+    },
+    {
+      id: "callbacks",
+      label: "Callbacks",
+    },
   ];
 
   const pageTitles = {
     dashboard: {
       title: "Dashboard",
-      subtitle: "Monitor your AI calling operations",
+      subtitle:
+        "Monitor your AI calling operations",
     },
+
     leads: {
       title: "Leads",
-      subtitle: "Manage leads received from Zoho CRM",
+      subtitle:
+        "Manage leads received from Zoho CRM",
     },
+
+    queue: {
+      title: "Call Queue",
+      subtitle:
+        "Monitor leads processed by the dialer",
+    },
+
     calls: {
       title: "Call History",
-      subtitle: "Review dialer call activity",
+      subtitle:
+        "Review dialer call activity",
     },
+
     callbacks: {
       title: "Callbacks",
-      subtitle: "Manage scheduled follow-ups",
+      subtitle:
+        "Manage scheduled follow-ups",
     },
   };
 
   const renderPage = () => {
     if (activePage === "leads") {
-      return <LeadsPage leads={leads} loading={loading} />;
+      return (
+        <LeadsPage
+          leads={leads}
+          loading={loading}
+        />
+      );
+    }
+
+    if (activePage === "queue") {
+      return (
+        <CallQueuePage
+          queue={queue}
+          loading={loading}
+        />
+      );
     }
 
     if (activePage === "calls") {
-      return <CallHistoryPage calls={calls} loading={loading} />;
+      return (
+        <CallHistoryPage
+          calls={calls}
+          loading={loading}
+        />
+      );
     }
 
     if (activePage === "callbacks") {
-      return <CallbacksPage queue={queue} loading={loading} />;
+      return (
+        <CallbacksPage
+          queue={queue}
+          loading={loading}
+        />
+      );
     }
 
     return (
@@ -585,10 +995,18 @@ function App() {
     );
   };
 
+  const backendConnected = !error && !loading;
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
+
+      {/* =========================
+          Desktop Sidebar
+      ========================= */}
+
       <aside className="fixed hidden h-screen w-64 border-r border-slate-200 bg-white lg:block">
         <div className="flex h-full flex-col">
+
           <div className="border-b border-slate-200 px-6 py-6">
             <h1 className="text-xl font-bold tracking-tight">
               AI Auto Dialer
@@ -603,7 +1021,9 @@ function App() {
             {navigation.map((item) => (
               <button
                 key={item.id}
-                onClick={() => setActivePage(item.id)}
+                onClick={() =>
+                  setActivePage(item.id)
+                }
                 className={`w-full rounded-xl px-4 py-3 text-left text-sm font-semibold transition ${
                   activePage === item.id
                     ? "bg-slate-900 text-white"
@@ -622,10 +1042,22 @@ function App() {
               </p>
 
               <div className="mt-2 flex items-center gap-2">
-                <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
+                <span
+                  className={`h-2.5 w-2.5 rounded-full ${
+                    loading
+                      ? "bg-amber-500"
+                      : backendConnected
+                      ? "bg-emerald-500"
+                      : "bg-red-500"
+                  }`}
+                />
 
                 <span className="text-sm font-medium text-slate-700">
-                  Backend Connected
+                  {loading
+                    ? "Connecting..."
+                    : backendConnected
+                    ? "Backend Connected"
+                    : "Backend Error"}
                 </span>
               </div>
             </div>
@@ -633,32 +1065,91 @@ function App() {
         </div>
       </aside>
 
-      <main className="lg:ml-64">
-        <header className="border-b border-slate-200 bg-white">
-          <div className="flex items-center justify-between px-6 py-5 lg:px-8">
-            <div>
-              <h2 className="text-2xl font-bold">
-                {pageTitles[activePage].title}
-              </h2>
+      {/* =========================
+          Main
+      ========================= */}
 
-              <p className="mt-1 text-sm text-slate-500">
-                {pageTitles[activePage].subtitle}
-              </p>
+      <main className="lg:ml-64">
+
+        {/* Header */}
+
+        <header className="border-b border-slate-200 bg-white">
+          <div className="px-6 py-5 lg:px-8">
+
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+
+              <div>
+                <h2 className="text-2xl font-bold">
+                  {pageTitles[activePage].title}
+                </h2>
+
+                <p className="mt-1 text-sm text-slate-500">
+                  {pageTitles[activePage].subtitle}
+                </p>
+              </div>
+
+              <div className="flex items-center gap-3">
+
+                {lastUpdated && (
+                  <span className="hidden text-xs text-slate-400 md:block">
+                    Updated{" "}
+                    {lastUpdated.toLocaleTimeString()}
+                  </span>
+                )}
+
+                <button
+                  onClick={() =>
+                    loadDashboard(true)
+                  }
+                  disabled={refreshing}
+                  className={`rounded-xl px-4 py-2.5 text-sm font-semibold text-white transition ${
+                    refreshing
+                      ? "cursor-not-allowed bg-slate-400"
+                      : "bg-slate-900 hover:bg-slate-800"
+                  }`}
+                >
+                  {refreshing
+                    ? "Refreshing..."
+                    : "Refresh"}
+                </button>
+              </div>
             </div>
 
-            <button
-              onClick={loadDashboard}
-              className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800"
-            >
-              Refresh
-            </button>
+            {/* Mobile Navigation */}
+
+            <div className="mt-4 flex gap-2 overflow-x-auto lg:hidden">
+              {navigation.map((item) => (
+                <button
+                  key={item.id}
+                  onClick={() =>
+                    setActivePage(item.id)
+                  }
+                  className={`whitespace-nowrap rounded-lg px-3 py-2 text-xs font-semibold transition ${
+                    activePage === item.id
+                      ? "bg-slate-900 text-white"
+                      : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                  }`}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
           </div>
         </header>
 
+        {/* Content */}
+
         <div className="space-y-8 p-6 lg:p-8">
+
           {error && (
             <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-              {error}
+              <div className="font-semibold">
+                Backend connection error
+              </div>
+
+              <div className="mt-1">
+                {error}
+              </div>
             </div>
           )}
 

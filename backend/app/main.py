@@ -2,9 +2,10 @@ from fastapi import FastAPI, Depends, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 from sqlalchemy import func
+
 # =====================================================
 # DATABASE
 # =====================================================
@@ -175,6 +176,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 # =====================================================
 # ROOT
@@ -678,6 +680,10 @@ async def exotel_call_status_webhook(
         or call_details.get("state")
     )
 
+    # =================================================
+    # VALIDATE PROVIDER CALL ID
+    # =================================================
+
     if not provider_call_id:
 
         return {
@@ -685,6 +691,10 @@ async def exotel_call_status_webhook(
             "message": "Exotel call SID not found",
             "received": True
         }
+
+    # =================================================
+    # FIND CALL ATTEMPT
+    # =================================================
 
     attempt = (
         db.query(CallAttempt)
@@ -704,6 +714,10 @@ async def exotel_call_status_webhook(
             "received": True
         }
 
+    # =================================================
+    # FIND QUEUE ITEM
+    # =================================================
+
     queue_item = (
         db.query(CallQueue)
         .filter(
@@ -721,6 +735,10 @@ async def exotel_call_status_webhook(
             "attempt_id": attempt.id,
             "received": True
         }
+
+    # =================================================
+    # NORMALIZE EXOTEL STATUS
+    # =================================================
 
     normalized_status = (
         str(call_status or "unknown")
@@ -744,64 +762,76 @@ async def exotel_call_status_webhook(
     }
 
     # =================================================
-    # START TIME
+    # PARSE PROVIDER START TIME
     # =================================================
+
+    provider_started_at = None
 
     start_time = call_details.get("start_time")
 
     if start_time:
 
-        print(
-            "Exotel start time:",
-            start_time
-        )
-
         try:
 
-            attempt.started_at = datetime.fromisoformat(
-                str(start_time).replace(
-                    "Z",
-                    "+00:00"
-                )
-            ).replace(tzinfo=None)
-
-        except (TypeError, ValueError):
-
-            print(
-                "Could not parse Exotel start_time"
+            provider_started_at = datetime.fromisoformat(
+                str(start_time).replace("Z", "+00:00")
             )
 
+            if provider_started_at.tzinfo is not None:
+
+                provider_started_at = (
+                    provider_started_at
+                    .astimezone(timezone.utc)
+                    .replace(tzinfo=None)
+                )
+
+        except (ValueError, TypeError):
+
+            print(
+                f"Unable to parse Exotel start_time: "
+                f"{start_time}"
+            )
+
+    if provider_started_at is not None:
+
+        attempt.started_at = provider_started_at
+
     # =================================================
-    # END TIME
+    # PARSE PROVIDER END TIME
     # =================================================
+
+    provider_ended_at = None
 
     end_time = call_details.get("end_time")
 
     if end_time:
 
-        print(
-            "Exotel end time:",
-            end_time
-        )
-
         try:
 
-            attempt.ended_at = datetime.fromisoformat(
-                str(end_time).replace(
-                    "Z",
-                    "+00:00"
-                )
-            ).replace(tzinfo=None)
+            provider_ended_at = datetime.fromisoformat(
+                str(end_time).replace("Z", "+00:00")
+            )
 
-        except (TypeError, ValueError):
+            if provider_ended_at.tzinfo is not None:
+
+                provider_ended_at = (
+                    provider_ended_at
+                    .astimezone(timezone.utc)
+                    .replace(tzinfo=None)
+                )
+
+        except (ValueError, TypeError):
 
             print(
-                "Could not parse Exotel end_time"
+                f"Unable to parse Exotel end_time: "
+                f"{end_time}"
             )
 
     # =================================================
-    # DURATION
+    # GET PROVIDER DURATION
     # =================================================
+
+    provider_duration = None
 
     total_talk_time = call_details.get(
         "total_talk_time"
@@ -811,130 +841,180 @@ async def exotel_call_status_webhook(
 
         try:
 
-            attempt.duration_seconds = int(
-                float(total_talk_time)
+            provider_duration = max(
+                0,
+                int(float(total_talk_time))
             )
 
-        except (TypeError, ValueError):
+        except (ValueError, TypeError):
 
             print(
-                "Could not parse Exotel total_talk_time"
+                f"Unable to parse Exotel duration: "
+                f"{total_talk_time}"
             )
 
-    elif attempt.started_at and attempt.ended_at:
+    # =================================================
+    # FALLBACK DURATION
+    # =================================================
 
-        attempt.duration_seconds = int(
-            (
-                attempt.ended_at
-                - attempt.started_at
-            ).total_seconds()
+    if (
+        provider_duration is None
+        and attempt.started_at
+        and provider_ended_at
+    ):
+
+        provider_duration = max(
+            0,
+            int(
+                (
+                    provider_ended_at
+                    - attempt.started_at
+                ).total_seconds()
+            )
         )
 
     # =================================================
-    # RECORDING
+    # RECORDING URL
     # =================================================
 
     recordings = call_details.get(
         "recordings"
     ) or []
 
-    if isinstance(recordings, list):
+    if recordings:
 
-        for recording in recordings:
+        first_recording = recordings[0]
 
-            if isinstance(recording, dict):
+        if isinstance(first_recording, dict):
 
-                recording_url = recording.get(
-                    "url"
-                )
+            recording_url = (
+                first_recording.get("url")
+                or first_recording.get("recording_url")
+            )
 
-                if recording_url:
+            if recording_url:
 
-                    attempt.recording_url = recording_url
-                    break
+                attempt.recording_url = recording_url
+
+        elif isinstance(first_recording, str):
+
+            attempt.recording_url = first_recording
 
     # =================================================
-    # STATUS UPDATE
+    # MAP EXOTEL STATUS TO INTERNAL STATUS
     # =================================================
+
+    internal_status = normalized_status
+    result = normalized_status
+    failure_reason = None
 
     if normalized_status in successful_statuses:
 
-        attempt.status = "completed"
-        attempt.result = "answered"
-        attempt.failure_reason = None
+        internal_status = "completed"
+        result = "answered"
+        failure_reason = None
 
-        queue_item.status = "completed"
-        queue_item.failure_reason = None
+    elif normalized_status == "no-answer":
 
-    elif normalized_status in failed_statuses:
+        internal_status = "no_answer"
+        result = "no_answer"
+        failure_reason = "no_answer"
 
-        attempt.status = normalized_status
-        attempt.result = normalized_status
-        attempt.failure_reason = normalized_status
+    elif normalized_status == "no_answer":
 
-        queue_item.status = normalized_status
-        queue_item.failure_reason = normalized_status
+        internal_status = "no_answer"
+        result = "no_answer"
+        failure_reason = "no_answer"
+
+    elif normalized_status == "busy":
+
+        internal_status = "busy"
+        result = "busy"
+        failure_reason = "busy"
+
+    elif normalized_status in {
+        "cancelled",
+        "canceled"
+    }:
+
+        internal_status = "failed"
+        result = "failed"
+        failure_reason = normalized_status
+
+    elif normalized_status == "failed":
+
+        internal_status = "failed"
+        result = "failed"
+        failure_reason = "failed"
 
     else:
 
-        attempt.status = normalized_status
+        internal_status = normalized_status
+        result = normalized_status
+        failure_reason = normalized_status
 
     # =================================================
-    # COMPLETION TIME
+    # SAVE PROVIDER DATA BEFORE COMMON HANDLER
     # =================================================
-
-    if normalized_status in (
-        successful_statuses
-        | failed_statuses
-    ):
-
-        now = datetime.utcnow()
-
-        queue_item.completed_at = now
 
     db.commit()
 
-    db.refresh(attempt)
-    db.refresh(queue_item)
+    # =================================================
+    # COMMON CALL RESULT HANDLER
+    # =================================================
 
-    print(
-        "Exotel webhook processed successfully"
+    result_data = handle_call_result(
+        queue_id=queue_item.id,
+        attempt_id=attempt.id,
+        status=internal_status,
+        result=result,
+        failure_reason=failure_reason,
+        db=db,
+        ended_at=provider_ended_at,
+        duration_seconds=provider_duration
     )
 
     print(
-        "Provider Call ID:",
-        provider_call_id
+        "Exotel webhook processed:",
+        {
+            "provider_call_id": provider_call_id,
+            "exotel_status": normalized_status,
+            "internal_status": internal_status,
+            "queue_id": queue_item.id,
+            "attempt_id": attempt.id,
+            "duration_seconds": provider_duration,
+            "retry": result_data.get("retry")
+        }
     )
 
-    print(
-        "Attempt ID:",
-        attempt.id
-    )
-
-    print(
-        "Queue ID:",
-        queue_item.id
-    )
-
-    print(
-        "Status:",
-        normalized_status
-    )
+    # =================================================
+    # RESPONSE
+    # =================================================
 
     return {
         "status": "success",
-        "message": (
-            "Exotel call status processed successfully"
-        ),
+        "message": "Exotel call status processed",
+        "received": True,
         "provider": "exotel",
         "provider_call_id": provider_call_id,
-        "attempt_id": attempt.id,
         "queue_id": queue_item.id,
-        "call_status": normalized_status,
-        "attempt_status": attempt.status,
-        "queue_status": queue_item.status,
-        "duration_seconds": attempt.duration_seconds,
-        "recording_url": attempt.recording_url
+        "attempt_id": attempt.id,
+        "exotel_status": normalized_status,
+        "internal_status": internal_status,
+        "result": result,
+        "duration_seconds": result_data.get(
+            "duration_seconds"
+        ),
+        "attempt_status": result_data.get(
+            "attempt_status"
+        ),
+        "queue_status": result_data.get(
+            "queue_status"
+        ),
+        "retry": result_data.get(
+            "retry",
+            False
+        )
     }
 
 
@@ -1499,8 +1579,6 @@ def ai_call_message(
     conversation = list(
         request.conversation
     )
-
-    # Load previous conversation from latest intelligence
 
     previous_intelligence = (
         db.query(CallIntelligence)

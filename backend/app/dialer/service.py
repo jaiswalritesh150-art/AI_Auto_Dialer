@@ -367,7 +367,9 @@ def handle_call_result(
     status: str,
     result: str | None,
     failure_reason: str | None,
-    db: Session
+    db: Session,
+    ended_at: datetime | None = None,
+    duration_seconds: int | None = None
 ):
     """
     Process the result of a call attempt.
@@ -414,13 +416,19 @@ def handle_call_result(
     attempt.status = status
     attempt.result = result
     attempt.failure_reason = failure_reason
-    attempt.ended_at = datetime.utcnow()
 
-    # =================================================
-    # CALCULATE CALL DURATION
-    # =================================================
+    # Use actual provider end time when available.
+    attempt.ended_at = ended_at or datetime.utcnow()
 
-    if attempt.started_at and attempt.ended_at:
+    # Prefer provider-reported duration.
+    if duration_seconds is not None:
+        attempt.duration_seconds = max(
+            0,
+            int(duration_seconds)
+        )
+
+    # Fallback for manual/internal call-result requests.
+    elif attempt.started_at and attempt.ended_at:
         attempt.duration_seconds = max(
             0,
             int(
