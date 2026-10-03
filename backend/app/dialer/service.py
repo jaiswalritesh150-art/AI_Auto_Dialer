@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sqlalchemy.orm import Session
 
@@ -574,6 +574,148 @@ def handle_call_result(
 
 
 # =====================================================
+# RECOVER STALE CALL ATTEMPTS
+# =====================================================
+
+def recover_stale_call_attempts(
+    db: Session,
+    timeout_seconds: int = 7200
+):
+    """
+    Recover call attempts that have remained active
+    for longer than the configured timeout.
+
+    Active attempt statuses:
+        started
+        initiated
+
+    An attempt is considered stale when:
+        - status is started or initiated
+        - started_at exists
+        - started_at is older than the timeout
+        - ended_at is still NULL
+
+    Maximum call duration is aligned with the
+    existing 7200-second duration safety limit.
+    """
+
+    cutoff_time = (
+        datetime.utcnow()
+        - timedelta(seconds=timeout_seconds)
+    )
+
+    stale_attempts = (
+        db.query(CallAttempt)
+        .filter(
+            CallAttempt.status.in_(
+                ["started", "initiated"]
+            ),
+            CallAttempt.started_at.isnot(None),
+            CallAttempt.started_at < cutoff_time,
+            CallAttempt.ended_at.is_(None)
+        )
+        .all()
+    )
+
+    recovered_attempts = []
+
+    for attempt in stale_attempts:
+
+        queue_item = (
+            db.query(CallQueue)
+            .filter(
+                CallQueue.id == attempt.queue_id
+            )
+            .first()
+        )
+
+        ended_at = datetime.utcnow()
+
+        # -------------------------------------------------
+        # CLOSE STALE ATTEMPT
+        # -------------------------------------------------
+
+        attempt.status = "failed"
+        attempt.result = "failed"
+        attempt.failure_reason = (
+            "Call attempt timed out or became stale"
+        )
+        attempt.ended_at = ended_at
+
+        # Calculate safe duration.
+        if attempt.started_at:
+
+            calculated_duration = max(
+                0,
+                int(
+                    (
+                        ended_at
+                        - attempt.started_at
+                    ).total_seconds()
+                )
+            )
+
+            attempt.duration_seconds = min(
+                calculated_duration,
+                timeout_seconds
+            )
+
+        queue_status = None
+        retry = False
+
+        # -------------------------------------------------
+        # RECOVER ASSOCIATED QUEUE
+        # -------------------------------------------------
+
+        if queue_item:
+
+            if attempt.attempt_number < 3:
+
+                queue_item.status = "queued"
+                queue_item.completed_at = None
+                queue_item.failure_reason = (
+                    "Previous call attempt timed out "
+                    "or became stale"
+                )
+
+                queue_status = "queued"
+                retry = True
+
+            else:
+
+                queue_item.status = "failed"
+                queue_item.completed_at = ended_at
+                queue_item.failure_reason = (
+                    "Maximum call attempts reached "
+                    "after stale call attempt"
+                )
+
+                queue_status = "failed"
+                retry = False
+
+        recovered_attempts.append({
+            "attempt_id": attempt.id,
+            "queue_id": attempt.queue_id,
+            "attempt_number": attempt.attempt_number,
+            "attempt_status": attempt.status,
+            "queue_status": queue_status,
+            "duration_seconds": attempt.duration_seconds,
+            "retry": retry
+        })
+
+    if stale_attempts:
+        db.commit()
+
+    return {
+        "success": True,
+        "recovered_count": len(
+            recovered_attempts
+        ),
+        "attempts": recovered_attempts
+    }
+
+
+# =====================================================
 # SCHEDULE CALLBACK
 # =====================================================
 
@@ -629,7 +771,18 @@ def process_due_callbacks(db: Session):
 
     Due callbacks are moved into the normal dialing queue
     and automatically processed into a new call attempt.
+
+    Stale call attempts are also recovered before
+    processing due callbacks.
     """
+
+    # -------------------------------------------------
+    # RECOVER STALE CALL ATTEMPTS
+    # -------------------------------------------------
+
+    stale_result = recover_stale_call_attempts(
+        db=db
+    )
 
     now = datetime.utcnow()
 
@@ -750,13 +903,29 @@ def process_due_callbacks(db: Session):
             "duration_seconds": call_result.get(
                 "duration_seconds"
             ),
-            "retry": call_result.get("retry", False),
-            "success": call_result.get("success", False),
+            "retry": call_result.get(
+                "retry",
+                False
+            ),
+            "success": call_result.get(
+                "success",
+                False
+            ),
             "crm": crm_result
         })
 
     return {
         "success": True,
-        "processed_count": len(processed_callbacks),
+        "stale_recovered_count": stale_result.get(
+            "recovered_count",
+            0
+        ),
+        "stale_attempts": stale_result.get(
+            "attempts",
+            []
+        ),
+        "processed_count": len(
+            processed_callbacks
+        ),
         "callbacks": processed_callbacks
     }
