@@ -1734,25 +1734,15 @@ def ai_call_message(
     )
 
     # =================================================
-    # ANALYZE CONVERSATION
+    # PROVISIONAL CALL INTELLIGENCE
     # =================================================
 
-    try:
-
-        analysis = analyze_call_transcript(
-            transcript
-        )
-
-    except Exception as exc:
-
-        raise HTTPException(
-            status_code=500,
-            detail=(
-                "Call intelligence analysis failed: "
-                f"{str(exc)}"
-            )
-        )
-
+    analysis = {
+        "summary": decision.get("reason", "Conversation continued."),
+        "sentiment": "neutral",
+        "outcome": decision_type
+    }
+    
     # =================================================
     # SAVE CALL INTELLIGENCE
     # =================================================
@@ -2011,6 +2001,44 @@ def end_ai_call(
         )
 
     # =================================================
+    # FINAL CALL INTELLIGENCE ANALYSIS
+    # =================================================
+
+    try:
+
+        analysis = analyze_call_transcript(
+            intelligence.transcript
+        )
+
+    except Exception as exc:
+
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Final call intelligence analysis failed: "
+                f"{str(exc)}"
+            )
+        )
+
+    intelligence.summary = (
+        analysis.get("summary")
+        or intelligence.summary
+        or ""
+    )
+
+    intelligence.sentiment = (
+        analysis.get("sentiment")
+        or intelligence.sentiment
+        or "neutral"
+    )
+
+    intelligence.outcome = (
+        analysis.get("outcome")
+        or intelligence.outcome
+        or "answered"
+    )
+
+    # =================================================
     # COMPLETE CALL
     # =================================================
 
@@ -2032,7 +2060,7 @@ def end_ai_call(
     queue_item.completed_at = now
 
     queue_item.failure_reason = None
-
+    
     # =================================================
     # UPDATE CRM
     # =================================================

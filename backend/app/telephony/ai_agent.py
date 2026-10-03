@@ -1,8 +1,16 @@
+import json
 import os
-import time
+import re
+from datetime import datetime, timedelta
 
 from dotenv import load_dotenv
 from google import genai
+from google.genai import types
+
+
+# =====================================================
+# ENVIRONMENT
+# =====================================================
 
 load_dotenv()
 
@@ -11,9 +19,35 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 if not GEMINI_API_KEY:
     raise ValueError("GEMINI_API_KEY is not configured")
 
+
+# =====================================================
+# GEMINI CLIENT
+# =====================================================
+
 client = genai.Client(
-    api_key=GEMINI_API_KEY
+    api_key=GEMINI_API_KEY,
+    http_options=types.HttpOptions(
+        timeout=60000
+    )
 )
+
+
+# =====================================================
+# CONFIGURATION
+# =====================================================
+
+GEMINI_MODELS = [
+    "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-flash-latest",
+]
+
+MAX_RETRIES_PER_MODEL = 1
+
+
+# =====================================================
+# SYSTEM PROMPT
+# =====================================================
 
 SYSTEM_PROMPT = """
 You are an AI voice calling assistant for a business.
@@ -46,15 +80,15 @@ You are participating in an automated business calling system.
 """
 
 
-def generate_response(
-    conversation: list[dict],
-    lead_context: dict | None = None
-) -> str:
+# =====================================================
+# HELPERS
+# =====================================================
 
-    context_text = ""
+def build_lead_context(lead_context: dict | None = None) -> str:
+    if not lead_context:
+        return ""
 
-    if lead_context:
-        context_text = f"""
+    return f"""
 LEAD INFORMATION:
 
 Name: {lead_context.get("first_name", "")} {lead_context.get("last_name", "")}
@@ -66,6 +100,12 @@ Use this information only when relevant.
 Do not expose internal lead information unnecessarily.
 """
 
+
+def build_conversation_contents(
+    conversation: list[dict],
+    lead_context: dict | None = None
+) -> list[dict]:
+
     contents = [
         {
             "role": "user",
@@ -76,6 +116,8 @@ Do not expose internal lead information unnecessarily.
             ]
         }
     ]
+
+    context_text = build_lead_context(lead_context)
 
     if context_text:
         contents.append(
@@ -106,70 +148,98 @@ Do not expose internal lead information unnecessarily.
             }
         )
 
-    models = [
-        "gemini-3.5-flash",
-        "gemini-3.5-flash-lite",
-        "gemini-flash-latest"
-    ]
+    return contents
+
+
+# =====================================================
+# AI RESPONSE GENERATION
+# =====================================================
+
+def generate_response(
+    conversation: list[dict],
+    lead_context: dict | None = None
+) -> str:
+
+    contents = build_conversation_contents(
+        conversation,
+        lead_context
+    )
 
     last_error = None
-    response = None
 
-    for model_name in models:
+    for model_name in GEMINI_MODELS:
 
-        for attempt in range(2):
+        for attempt in range(MAX_RETRIES_PER_MODEL + 1):
 
             try:
+
                 response = client.models.generate_content(
                     model=model_name,
                     contents=contents
                 )
 
                 if response and response.text:
+
                     return response.text.strip()
 
+                raise ValueError(
+                    f"Gemini returned an empty response using {model_name}"
+                )
+
             except Exception as exc:
+
                 last_error = exc
 
-                if attempt == 0:
-                    time.sleep(2)
+                print(
+                    f"[AI_AGENT] Gemini error | "
+                    f"model={model_name} | "
+                    f"attempt={attempt + 1} | "
+                    f"error={exc}"
+                )
 
-    if last_error:
-        raise last_error
+    # -------------------------------------------------
+    # Safe fallback
+    # -------------------------------------------------
 
-    return "I'm sorry, could you please repeat that?"
+    print(
+        f"[AI_AGENT] All Gemini models failed. "
+        f"Last error: {last_error}"
+    )
+
+    return (
+        "I'm sorry, I'm having a little trouble right now. "
+        "Could you please repeat that?"
+    )
+
+
+# =====================================================
+# CALL DECISION DETECTION
+# =====================================================
 
 def detect_call_decision(
     conversation: list[dict],
     lead_context: dict | None = None
 ) -> dict:
 
-    context_text = ""
+    context_text = build_lead_context(lead_context)
 
-    if lead_context:
-        context_text = f"""
-LEAD INFORMATION:
-
-Name: {lead_context.get("first_name", "")} {lead_context.get("last_name", "")}
-Company: {lead_context.get("company", "")}
-Lead Source: {lead_context.get("lead_source", "")}
-Lead Status: {lead_context.get("lead_status", "")}
-"""
-
-    transcript = ""
+    transcript_lines = []
 
     for message in conversation:
+
         role = message.get("role", "user")
         text = message.get("text", "")
 
-        if role == "assistant":
-            role = "AI Agent"
-        elif role == "model":
-            role = "AI Agent"
+        if role in ("assistant", "model"):
+            speaker = "AI Agent"
         else:
-            role = "Lead"
+            speaker = "Lead"
 
-        transcript += f"{role}: {text}\n"
+        transcript_lines.append(
+            f"{speaker}: {text}"
+        )
+
+    transcript = "\n".join(transcript_lines)
 
     prompt = f"""
 You are a call decision engine for an AI sales calling system.
@@ -197,19 +267,14 @@ Rules:
 - Do not add explanations outside JSON.
 """
 
-    models = [
-        "gemini-3.5-flash",
-        "gemini-3.5-flash-lite",
-        "gemini-flash-latest"
-    ]
-
     last_error = None
 
-    for model_name in models:
+    for model_name in GEMINI_MODELS:
 
-        for attempt in range(2):
+        for attempt in range(MAX_RETRIES_PER_MODEL + 1):
 
             try:
+
                 response = client.models.generate_content(
                     model=model_name,
                     contents=prompt
@@ -222,43 +287,72 @@ Rules:
 
                 text = response.text.strip()
 
+                # Remove markdown fences if Gemini returns them.
                 if text.startswith("```"):
                     text = (
-                        text.replace("```json", "")
+                        text
+                        .replace("```json", "")
                         .replace("```", "")
                         .strip()
                     )
 
-                import json
-
                 result = json.loads(text)
 
+                decision = result.get(
+                    "decision",
+                    "continue"
+                )
+
+                reason = result.get(
+                    "reason",
+                    ""
+                )
+
+                valid_decisions = {
+                    "continue",
+                    "callback_requested",
+                    "not_interested",
+                    "converted",
+                    "no_further_contact",
+                }
+
+                if decision not in valid_decisions:
+                    decision = "continue"
+
                 return {
-                    "decision": result.get("decision", "continue"),
-                    "reason": result.get("reason", "")
+                    "decision": decision,
+                    "reason": reason
                 }
 
             except Exception as exc:
 
                 last_error = exc
 
-                if attempt == 0:
-                    time.sleep(2)
+                print(
+                    f"[AI_AGENT] Decision error | "
+                    f"model={model_name} | "
+                    f"attempt={attempt + 1} | "
+                    f"error={exc}"
+                )
 
-    if last_error:
-        raise last_error
+    # -------------------------------------------------
+    # Safe fallback
+    # -------------------------------------------------
+
+    print(
+        f"[AI_AGENT] Decision detection failed. "
+        f"Last error: {last_error}"
+    )
 
     return {
         "decision": "continue",
         "reason": "Unable to determine call decision"
     }
-    
+
+
 # =====================================================
 # CALLBACK TIME EXTRACTION
 # =====================================================
-
-from datetime import datetime, timedelta
-import re
 
 def extract_callback_time(message: str):
     """
@@ -266,20 +360,23 @@ def extract_callback_time(message: str):
 
     Supports:
     - tomorrow
-    - tomorrow morning / afternoon / evening
+    - tomorrow morning
+    - tomorrow afternoon
+    - tomorrow evening
     - tomorrow at 5 PM
     - tomorrow around 3:30 PM
     - today at 6 PM
     - today evening
-    - tomorrow ... 10 AM
     """
 
     text = message.lower().strip()
+
+    # Keep existing behavior compatible with the project.
     now = datetime.utcnow()
 
-    # ---------------------------------------------
+    # -------------------------------------------------
     # Determine callback date
-    # ---------------------------------------------
+    # -------------------------------------------------
 
     if "tomorrow" in text:
         callback_date = now + timedelta(days=1)
@@ -290,12 +387,15 @@ def extract_callback_time(message: str):
     else:
         return None
 
-    # ---------------------------------------------
+    # -------------------------------------------------
     # Specific time
-    # ---------------------------------------------
+    # -------------------------------------------------
 
     time_match = re.search(
-        r"\b(?:at|around)\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b",
+        r"\b(?:at|around)\s+"
+        r"(\d{1,2})"
+        r"(?::(\d{2}))?"
+        r"\s*(am|pm)?\b",
         text
     )
 
@@ -320,9 +420,9 @@ def extract_callback_time(message: str):
                 microsecond=0
             )
 
-    # ---------------------------------------------
+    # -------------------------------------------------
     # Time of day
-    # ---------------------------------------------
+    # -------------------------------------------------
 
     if "morning" in text:
 
@@ -351,9 +451,9 @@ def extract_callback_time(message: str):
             microsecond=0
         )
 
-    # ---------------------------------------------
+    # -------------------------------------------------
     # Default tomorrow time
-    # ---------------------------------------------
+    # -------------------------------------------------
 
     if "tomorrow" in text:
 
