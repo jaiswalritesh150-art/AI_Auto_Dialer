@@ -50,6 +50,11 @@ EXOTEL_STATUS_CALLBACK_URL = os.getenv(
 
 EXOTEL_BASE_URL = "https://api.exotel.com"
 
+# Telephony execution mode.
+# "live"  -> real Exotel API
+# "mock"  -> simulated call for development/testing
+TELEPHONY_MODE = os.getenv("TELEPHONY_MODE", "live").lower()
+
 
 # =====================================================
 # INITIATE CALL
@@ -70,6 +75,35 @@ def initiate_call(phone: str, queue_id: int, attempt_id: int):
         Public endpoint where Exotel sends terminal
         call status updates.
     """
+
+    # -------------------------------------------------
+    # MOCK TELEPHONY MODE
+    # -------------------------------------------------
+
+    if TELEPHONY_MODE == "mock":
+
+        mock_call_id = (
+            f"MOCK-{uuid4().hex[:10].upper()}"
+        )
+
+        return {
+            "success": True,
+            "provider": "mock",
+            "mode": "mock",
+            "call_id": mock_call_id,
+            "queue_id": queue_id,
+            "attempt_id": attempt_id,
+            "phone": phone,
+            "to": phone,
+            "caller_id": "MOCK_CALLER",
+            "status": "initiated",
+            "http_status": 200,
+            "response": {
+                "message": "Mock call initiated successfully"
+            },
+            "status_callback": None,
+            "initiated_at": datetime.utcnow()
+        }
 
     # -------------------------------------------------
     # VALIDATE PHONE
