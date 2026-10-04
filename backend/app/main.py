@@ -317,7 +317,6 @@ def get_leads(
         ]
     }
 
-
 # =====================================================
 # GET CALL QUEUE
 # =====================================================
@@ -347,13 +346,39 @@ def get_call_queue(
                 "completed_at": item.completed_at,
                 "failure_reason": item.failure_reason,
                 "callback_at": item.callback_at,
-                "callback_status": item.callback_status
+                "callback_status": item.callback_status,
+
+                # Lead information
+                "priority": (
+                    db.query(Lead.priority)
+                    .filter(Lead.id == item.lead_id)
+                    .scalar()
+                ),
+                "lead_score": (
+                    db.query(Lead.lead_score)
+                    .filter(Lead.id == item.lead_id)
+                    .scalar()
+                ),
+                "first_name": (
+                    db.query(Lead.first_name)
+                    .filter(Lead.id == item.lead_id)
+                    .scalar()
+                ),
+                "last_name": (
+                    db.query(Lead.last_name)
+                    .filter(Lead.id == item.lead_id)
+                    .scalar()
+                ),
+                "company": (
+                    db.query(Lead.company)
+                    .filter(Lead.id == item.lead_id)
+                    .scalar()
+                )
             }
             for item in queue_items
         ]
     }
-
-
+    
 # =====================================================
 # GET ALL CALL ATTEMPTS
 # =====================================================

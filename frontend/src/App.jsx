@@ -51,7 +51,9 @@ function formatDuration(seconds) {
 function StatCard({ title, value, subtitle }) {
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-      <p className="text-sm font-medium text-slate-500">{title}</p>
+      <p className="text-sm font-medium text-slate-500">
+        {title}
+      </p>
 
       <p className="mt-2 text-3xl font-bold text-slate-900">
         {value}
@@ -65,6 +67,8 @@ function StatCard({ title, value, subtitle }) {
 }
 
 function StatusBadge({ status }) {
+  const normalizedStatus = String(status || "").toLowerCase();
+
   const styles = {
     completed: "bg-emerald-50 text-emerald-700",
     failed: "bg-red-50 text-red-700",
@@ -81,15 +85,21 @@ function StatusBadge({ status }) {
   return (
     <span
       className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${
-        styles[status] || "bg-slate-100 text-slate-600"
+        styles[normalizedStatus] || "bg-slate-100 text-slate-600"
       }`}
     >
-      {status?.replaceAll("_", " ") || "unknown"}
+      {normalizedStatus
+        ? normalizedStatus.replaceAll("_", " ")
+        : "unknown"}
     </span>
   );
 }
 
 function PriorityBadge({ priority }) {
+  const normalizedPriority = String(
+    priority || ""
+  ).toUpperCase();
+
   const styles = {
     HIGH: "bg-red-50 text-red-700",
     MEDIUM: "bg-amber-50 text-amber-700",
@@ -99,7 +109,8 @@ function PriorityBadge({ priority }) {
   return (
     <span
       className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${
-        styles[priority] || "bg-slate-100 text-slate-600"
+        styles[normalizedPriority] ||
+        "bg-slate-100 text-slate-600"
       }`}
     >
       {priority || "—"}
@@ -111,20 +122,33 @@ function PriorityBadge({ priority }) {
    Dashboard
 ========================= */
 
-function DashboardPage({ stats, leads, calls, loading }) {
+function DashboardPage({
+  stats,
+  leads,
+  calls,
+  loading,
+}) {
   const recentLeads = [...leads]
-    .sort((a, b) => Number(b.id || 0) - Number(a.id || 0))
+    .sort(
+      (a, b) =>
+        Number(b.id || 0) - Number(a.id || 0)
+    )
     .slice(0, 8);
 
   const recentCalls = [...calls]
-    .sort((a, b) => Number(b.id || 0) - Number(a.id || 0))
+    .sort(
+      (a, b) =>
+        Number(b.id || 0) - Number(a.id || 0)
+    )
     .slice(0, 8);
 
   return (
     <div className="space-y-8">
       <section>
         <div className="mb-4">
-          <h3 className="text-lg font-bold">Overview</h3>
+          <h3 className="text-lg font-bold">
+            Overview
+          </h3>
 
           <p className="text-sm text-slate-500">
             Current system performance
@@ -177,7 +201,9 @@ function DashboardPage({ stats, leads, calls, loading }) {
       <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="flex items-center justify-between border-b border-slate-200 px-6 py-5">
           <div>
-            <h3 className="font-bold">Recent Leads</h3>
+            <h3 className="font-bold">
+              Recent Leads
+            </h3>
 
             <p className="mt-1 text-sm text-slate-500">
               Latest leads received from CRM
@@ -193,11 +219,21 @@ function DashboardPage({ stats, leads, calls, loading }) {
           <table className="w-full min-w-[700px] text-left">
             <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
               <tr>
-                <th className="px-6 py-3">Lead</th>
-                <th className="px-6 py-3">Company</th>
-                <th className="px-6 py-3">Phone</th>
-                <th className="px-6 py-3">Score</th>
-                <th className="px-6 py-3">Priority</th>
+                <th className="px-6 py-3">
+                  Lead
+                </th>
+                <th className="px-6 py-3">
+                  Company
+                </th>
+                <th className="px-6 py-3">
+                  Phone
+                </th>
+                <th className="px-6 py-3">
+                  Score
+                </th>
+                <th className="px-6 py-3">
+                  Priority
+                </th>
               </tr>
             </thead>
 
@@ -209,7 +245,8 @@ function DashboardPage({ stats, leads, calls, loading }) {
                 >
                   <td className="px-6 py-4">
                     <p className="font-semibold">
-                      {lead.first_name} {lead.last_name}
+                      {lead.first_name}{" "}
+                      {lead.last_name}
                     </p>
 
                     <p className="text-xs text-slate-500">
@@ -232,7 +269,9 @@ function DashboardPage({ stats, leads, calls, loading }) {
                   </td>
 
                   <td className="px-6 py-4">
-                    <PriorityBadge priority={lead.priority} />
+                    <PriorityBadge
+                      priority={lead.priority}
+                    />
                   </td>
                 </tr>
               ))}
@@ -256,7 +295,9 @@ function DashboardPage({ stats, leads, calls, loading }) {
 
       <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-200 px-6 py-5">
-          <h3 className="font-bold">Recent Call Attempts</h3>
+          <h3 className="font-bold">
+            Recent Call Attempts
+          </h3>
 
           <p className="mt-1 text-sm text-slate-500">
             Latest activity from the dialer
@@ -267,11 +308,21 @@ function DashboardPage({ stats, leads, calls, loading }) {
           <table className="w-full min-w-[700px] text-left">
             <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
               <tr>
-                <th className="px-6 py-3">Attempt</th>
-                <th className="px-6 py-3">Queue</th>
-                <th className="px-6 py-3">Provider</th>
-                <th className="px-6 py-3">Status</th>
-                <th className="px-6 py-3">Result</th>
+                <th className="px-6 py-3">
+                  Attempt
+                </th>
+                <th className="px-6 py-3">
+                  Queue
+                </th>
+                <th className="px-6 py-3">
+                  Provider
+                </th>
+                <th className="px-6 py-3">
+                  Status
+                </th>
+                <th className="px-6 py-3">
+                  Result
+                </th>
               </tr>
             </thead>
 
@@ -294,7 +345,9 @@ function DashboardPage({ stats, leads, calls, loading }) {
                   </td>
 
                   <td className="px-6 py-4">
-                    <StatusBadge status={call.status} />
+                    <StatusBadge
+                      status={call.status}
+                    />
                   </td>
 
                   <td className="px-6 py-4 text-sm text-slate-600">
@@ -329,14 +382,17 @@ function DashboardPage({ stats, leads, calls, loading }) {
 
 function LeadsPage({ leads, loading }) {
   const sortedLeads = [...leads].sort(
-    (a, b) => Number(b.id || 0) - Number(a.id || 0)
+    (a, b) =>
+      Number(b.id || 0) - Number(a.id || 0)
   );
 
   return (
     <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
       <div className="flex items-center justify-between border-b border-slate-200 px-6 py-5">
         <div>
-          <h3 className="text-lg font-bold">All Leads</h3>
+          <h3 className="text-lg font-bold">
+            All Leads
+          </h3>
 
           <p className="mt-1 text-sm text-slate-500">
             Leads received from Zoho CRM
@@ -375,7 +431,8 @@ function LeadsPage({ leads, loading }) {
 
                 <td className="px-6 py-4">
                   <p className="font-semibold">
-                    {lead.first_name} {lead.last_name}
+                    {lead.first_name}{" "}
+                    {lead.last_name}
                   </p>
 
                   <p className="text-xs text-slate-500">
@@ -400,11 +457,15 @@ function LeadsPage({ leads, loading }) {
                 </td>
 
                 <td className="px-6 py-4">
-                  <PriorityBadge priority={lead.priority} />
+                  <PriorityBadge
+                    priority={lead.priority}
+                  />
                 </td>
 
                 <td className="px-6 py-4">
-                  <StatusBadge status={lead.lead_status} />
+                  <StatusBadge
+                    status={lead.lead_status}
+                  />
                 </td>
               </tr>
             ))}
@@ -430,9 +491,66 @@ function LeadsPage({ leads, loading }) {
    Call Queue
 ========================= */
 
-function CallQueuePage({ queue, loading }) {
+function CallQueuePage({
+  queue,
+  loading,
+  onProcessQueueCall,
+  processingQueueId,
+}) {
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] =
+    useState("all");
+  const [priorityFilter, setPriorityFilter] =
+    useState("all");
+
   const sortedQueue = [...queue].sort(
-    (a, b) => Number(b.id || 0) - Number(a.id || 0)
+    (a, b) =>
+      Number(b.id || 0) - Number(a.id || 0)
+  );
+
+  const filteredQueue = sortedQueue.filter(
+    (item) => {
+      const searchText = search
+        .trim()
+        .toLowerCase();
+
+      const matchesSearch =
+        !searchText ||
+        String(item.id || "")
+          .toLowerCase()
+          .includes(searchText) ||
+        String(item.lead_id || "")
+          .toLowerCase()
+          .includes(searchText) ||
+        String(item.phone || "")
+          .toLowerCase()
+          .includes(searchText) ||
+        String(item.status || "")
+          .toLowerCase()
+          .includes(searchText) ||
+        String(item.failure_reason || "")
+          .toLowerCase()
+          .includes(searchText);
+
+      const matchesStatus =
+        statusFilter === "all" ||
+        String(item.status || "").toLowerCase() ===
+          statusFilter;
+
+      const itemPriority = String(
+        item.priority || ""
+      ).toLowerCase();
+
+      const matchesPriority =
+        priorityFilter === "all" ||
+        itemPriority === priorityFilter;
+
+      return (
+        matchesSearch &&
+        matchesStatus &&
+        matchesPriority
+      );
+    }
   );
 
   const total = queue.length;
@@ -442,7 +560,10 @@ function CallQueuePage({ queue, loading }) {
   ).length;
 
   const calling = queue.filter(
-    (item) => item.status === "calling"
+    (item) =>
+      item.status === "calling" ||
+      item.status === "initiated" ||
+      item.status === "in_progress"
   ).length;
 
   const completed = queue.filter(
@@ -454,8 +575,14 @@ function CallQueuePage({ queue, loading }) {
   ).length;
 
   const callbacks = queue.filter(
-    (item) => item.callback_at || item.callback_status
+    (item) =>
+      item.callback_at ||
+      item.callback_status
   ).length;
+
+  const canProcess = (item) =>
+    item.status === "queued" ||
+    item.status === "failed";
 
   return (
     <div className="space-y-6">
@@ -502,20 +629,85 @@ function CallQueuePage({ queue, loading }) {
       {/* Queue Table */}
 
       <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div className="flex items-center justify-between border-b border-slate-200 px-6 py-5">
-          <div>
-            <h3 className="text-lg font-bold">
-              Call Queue
-            </h3>
+        <div className="border-b border-slate-200 px-6 py-5">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <h3 className="text-lg font-bold">
+                Call Queue
+              </h3>
 
-            <p className="mt-1 text-sm text-slate-500">
-              Leads waiting for or processed by the dialer
-            </p>
+              <p className="mt-1 text-sm text-slate-500">
+                Leads waiting for or processed by
+                the dialer
+              </p>
+            </div>
+
+            <div className="rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-600">
+              {filteredQueue.length} of {total} queue
+              items
+            </div>
           </div>
 
-          <span className="rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-600">
-            {total} queue items
-          </span>
+          {/* Search + Filters */}
+
+          <div className="mt-5 flex flex-col gap-3 lg:flex-row">
+            <input
+              type="text"
+              value={search}
+              onChange={(e) =>
+                setSearch(e.target.value)
+              }
+              placeholder="Search by queue ID, lead ID, phone..."
+              className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:ring-2 focus:ring-slate-100 lg:flex-1"
+            />
+
+            <select
+              value={statusFilter}
+              onChange={(e) =>
+                setStatusFilter(e.target.value)
+              }
+              className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-100"
+            >
+              <option value="all">
+                All Status
+              </option>
+              <option value="queued">
+                Queued
+              </option>
+              <option value="calling">
+                Calling
+              </option>
+              <option value="initiated">
+                Initiated
+              </option>
+              <option value="in_progress">
+                In Progress
+              </option>
+              <option value="completed">
+                Completed
+              </option>
+              <option value="failed">
+                Failed
+              </option>
+            </select>
+
+            <select
+              value={priorityFilter}
+              onChange={(e) =>
+                setPriorityFilter(e.target.value)
+              }
+              className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-100"
+            >
+              <option value="all">
+                All Priority
+              </option>
+              <option value="high">High</option>
+              <option value="medium">
+                Medium
+              </option>
+              <option value="low">Low</option>
+            </select>
+          </div>
         </div>
 
         {loading && queue.length === 0 ? (
@@ -524,93 +716,177 @@ function CallQueuePage({ queue, loading }) {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1200px] text-left">
+            <table className="w-full min-w-[1450px] text-left">
               <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                 <tr>
-                  <th className="px-6 py-3">Queue</th>
-                  <th className="px-6 py-3">Lead</th>
-                  <th className="px-6 py-3">Phone</th>
-                  <th className="px-6 py-3">Status</th>
-                  <th className="px-6 py-3">Queued At</th>
-                  <th className="px-6 py-3">Started At</th>
-                  <th className="px-6 py-3">Completed At</th>
-                  <th className="px-6 py-3">Callback</th>
-                  <th className="px-6 py-3">Reason</th>
+                  <th className="px-6 py-3">
+                    Queue
+                  </th>
+                  <th className="px-6 py-3">
+                    Lead
+                  </th>
+                  <th className="px-6 py-3">
+                    Phone
+                  </th>
+                  <th className="px-6 py-3">
+                    Priority
+                  </th>
+                  <th className="px-6 py-3">
+                    Status
+                  </th>
+                  <th className="px-6 py-3">
+                    Queued At
+                  </th>
+                  <th className="px-6 py-3">
+                    Started At
+                  </th>
+                  <th className="px-6 py-3">
+                    Callback
+                  </th>
+                  <th className="px-6 py-3">
+                    Reason
+                  </th>
+                  <th className="px-6 py-3">
+                    Action
+                  </th>
                 </tr>
               </thead>
 
               <tbody className="divide-y divide-slate-100">
-                {sortedQueue.map((item) => (
-                  <tr
-                    key={item.id}
-                    className="transition hover:bg-slate-50"
-                  >
-                    <td className="px-6 py-4 font-semibold">
-                      #{item.id}
-                    </td>
+                {filteredQueue.map((item) => {
+                  const isProcessing =
+                    processingQueueId === item.id;
 
-                    <td className="px-6 py-4 text-sm text-slate-600">
-                      #{item.lead_id}
-                    </td>
-
-                    <td className="px-6 py-4 text-sm text-slate-600">
-                      {item.phone || "—"}
-                    </td>
-
-                    <td className="px-6 py-4">
-                      <StatusBadge status={item.status} />
-                    </td>
-
-                    <td className="px-6 py-4 text-sm text-slate-600">
-                      {formatDate(item.queued_at)}
-                    </td>
-
-                    <td className="px-6 py-4 text-sm text-slate-600">
-                      {formatDate(item.started_at)}
-                    </td>
-
-                    <td className="px-6 py-4 text-sm text-slate-600">
-                      {formatDate(item.completed_at)}
-                    </td>
-
-                    <td className="px-6 py-4">
-                      <div className="space-y-1">
-                        <p className="text-sm text-slate-600">
-                          {formatDate(item.callback_at)}
-                        </p>
-
-                        {item.callback_status && (
-                          <StatusBadge
-                            status={item.callback_status}
-                          />
-                        )}
-                      </div>
-                    </td>
-
-                    <td className="max-w-xs px-6 py-4">
-                      {item.failure_reason ? (
-                        <span className="text-sm font-medium text-red-600">
-                          {item.failure_reason}
-                        </span>
-                      ) : (
-                        <span className="text-sm text-slate-400">
-                          —
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-
-                {!loading && queue.length === 0 && (
-                  <tr>
-                    <td
-                      colSpan="9"
-                      className="px-6 py-10 text-center text-sm text-slate-500"
+                  return (
+                    <tr
+                      key={item.id}
+                      className="transition hover:bg-slate-50"
                     >
-                      No call queue items found
-                    </td>
-                  </tr>
-                )}
+                      <td className="px-6 py-4 font-semibold">
+                        #{item.id}
+                      </td>
+
+                      <td className="px-6 py-4 text-sm text-slate-600">
+                        #{item.lead_id ?? "—"}
+                      </td>
+
+                      <td className="px-6 py-4 text-sm text-slate-600">
+                        {item.phone || "—"}
+                      </td>
+
+                      <td className="px-6 py-4">
+                        <PriorityBadge
+                          priority={item.priority}
+                        />
+                      </td>
+
+                      <td className="px-6 py-4">
+                        <StatusBadge
+                          status={item.status}
+                        />
+                      </td>
+
+                      <td className="px-6 py-4 text-sm text-slate-600">
+                        {formatDate(
+                          item.queued_at
+                        )}
+                      </td>
+
+                      <td className="px-6 py-4 text-sm text-slate-600">
+                        {formatDate(
+                          item.started_at
+                        )}
+                      </td>
+
+                      <td className="px-6 py-4">
+                        <div className="space-y-1">
+                          <p className="text-sm text-slate-600">
+                            {formatDate(
+                              item.callback_at
+                            )}
+                          </p>
+
+                          {item.callback_status && (
+                            <StatusBadge
+                              status={
+                                item.callback_status
+                              }
+                            />
+                          )}
+                        </div>
+                      </td>
+
+                      <td className="max-w-xs px-6 py-4">
+                        {item.failure_reason ? (
+                          <span className="text-sm font-medium text-red-600">
+                            {item.failure_reason}
+                          </span>
+                        ) : (
+                          <span className="text-sm text-slate-400">
+                            —
+                          </span>
+                        )}
+                      </td>
+
+                      <td className="px-6 py-4">
+                        {canProcess(item) ? (
+                          <button
+                            onClick={() =>
+                              onProcessQueueCall(
+                                item.id
+                              )
+                            }
+                            disabled={
+                              isProcessing ||
+                              processingQueueId !==
+                                null
+                            }
+                            className={`whitespace-nowrap rounded-lg px-3 py-2 text-xs font-semibold text-white transition ${
+                              isProcessing ||
+                              processingQueueId !==
+                                null
+                                ? "cursor-not-allowed bg-slate-400"
+                                : item.status ===
+                                  "failed"
+                                ? "bg-red-600 hover:bg-red-700"
+                                : "bg-emerald-600 hover:bg-emerald-700"
+                            }`}
+                          >
+                            {isProcessing
+                              ? "Processing..."
+                              : item.status ===
+                                "failed"
+                              ? "Retry Call"
+                              : "Process Call"}
+                          </button>
+                        ) : (
+                          <span className="text-xs font-medium text-slate-400">
+                            —
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+
+                {!loading &&
+                  filteredQueue.length === 0 && (
+                    <tr>
+                      <td
+                        colSpan="10"
+                        className="px-6 py-12 text-center"
+                      >
+                        <div className="text-sm font-semibold text-slate-700">
+                          No queue items found
+                        </div>
+
+                        <div className="mt-1 text-xs text-slate-500">
+                          Try changing your search
+                          or filters.
+                        </div>
+                      </td>
+                    </tr>
+                  )}
               </tbody>
             </table>
           </div>
@@ -624,41 +900,75 @@ function CallQueuePage({ queue, loading }) {
    Call History
 ========================= */
 
-function CallHistoryPage({ calls, loading }) {
+function CallHistoryPage({
+  calls,
+  loading,
+}) {
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [statusFilter, setStatusFilter] =
+    useState("all");
 
   const sortedCalls = [...calls].sort(
-    (a, b) => Number(b.id || 0) - Number(a.id || 0)
+    (a, b) =>
+      Number(b.id || 0) - Number(a.id || 0)
   );
 
-  const filteredCalls = sortedCalls.filter((call) => {
-    const searchText = search.trim().toLowerCase();
+  const filteredCalls = sortedCalls.filter(
+    (call) => {
+      const searchText = search
+        .trim()
+        .toLowerCase();
 
-    const matchesSearch =
-      !searchText ||
-      String(call.id || "").toLowerCase().includes(searchText) ||
-      String(call.queue_id || "").toLowerCase().includes(searchText) ||
-      String(call.provider || "").toLowerCase().includes(searchText) ||
-      String(call.result || "").toLowerCase().includes(searchText) ||
-      String(call.failure_reason || "").toLowerCase().includes(searchText) ||
-      String(call.provider_call_id || "")
-        .toLowerCase()
-        .includes(searchText);
+      const matchesSearch =
+        !searchText ||
+        String(call.id || "")
+          .toLowerCase()
+          .includes(searchText) ||
+        String(call.queue_id || "")
+          .toLowerCase()
+          .includes(searchText) ||
+        String(call.provider || "")
+          .toLowerCase()
+          .includes(searchText) ||
+        String(call.result || "")
+          .toLowerCase()
+          .includes(searchText) ||
+        String(call.failure_reason || "")
+          .toLowerCase()
+          .includes(searchText) ||
+        String(call.provider_call_id || "")
+          .toLowerCase()
+          .includes(searchText);
 
-    const matchesStatus =
-      statusFilter === "all" ||
-      String(call.status || "").toLowerCase() === statusFilter;
+      const matchesStatus =
+        statusFilter === "all" ||
+        String(call.status || "").toLowerCase() ===
+          statusFilter;
 
-    return matchesSearch && matchesStatus;
-  });
+      return (
+        matchesSearch && matchesStatus
+      );
+    }
+  );
 
   const statusOptions = [
     { value: "all", label: "All Status" },
-    { value: "completed", label: "Completed" },
-    { value: "failed", label: "Failed" },
-    { value: "started", label: "Started" },
-    { value: "initiated", label: "Initiated" },
+    {
+      value: "completed",
+      label: "Completed",
+    },
+    {
+      value: "failed",
+      label: "Failed",
+    },
+    {
+      value: "started",
+      label: "Started",
+    },
+    {
+      value: "initiated",
+      label: "Initiated",
+    },
   ];
 
   return (
@@ -676,7 +986,8 @@ function CallHistoryPage({ calls, loading }) {
           </div>
 
           <div className="rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-600">
-            {filteredCalls.length} of {calls.length} attempts
+            {filteredCalls.length} of{" "}
+            {calls.length} attempts
           </div>
         </div>
 
@@ -684,14 +995,18 @@ function CallHistoryPage({ calls, loading }) {
           <input
             type="text"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) =>
+              setSearch(e.target.value)
+            }
             placeholder="Search by ID, queue, provider, result..."
             className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:ring-2 focus:ring-slate-100 md:flex-1"
           />
 
           <select
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
+            onChange={(e) =>
+              setStatusFilter(e.target.value)
+            }
             className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-100"
           >
             {statusOptions.map((option) => (
@@ -710,15 +1025,33 @@ function CallHistoryPage({ calls, loading }) {
         <table className="w-full min-w-[1250px] text-left">
           <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
             <tr>
-              <th className="px-6 py-3">Attempt</th>
-              <th className="px-6 py-3">Queue</th>
-              <th className="px-6 py-3">Attempt #</th>
-              <th className="px-6 py-3">Provider</th>
-              <th className="px-6 py-3">Status</th>
-              <th className="px-6 py-3">Result</th>
-              <th className="px-6 py-3">Duration</th>
-              <th className="px-6 py-3">Failure Reason</th>
-              <th className="px-6 py-3">Started</th>
+              <th className="px-6 py-3">
+                Attempt
+              </th>
+              <th className="px-6 py-3">
+                Queue
+              </th>
+              <th className="px-6 py-3">
+                Attempt #
+              </th>
+              <th className="px-6 py-3">
+                Provider
+              </th>
+              <th className="px-6 py-3">
+                Status
+              </th>
+              <th className="px-6 py-3">
+                Result
+              </th>
+              <th className="px-6 py-3">
+                Duration
+              </th>
+              <th className="px-6 py-3">
+                Failure Reason
+              </th>
+              <th className="px-6 py-3">
+                Started
+              </th>
             </tr>
           </thead>
 
@@ -777,27 +1110,31 @@ function CallHistoryPage({ calls, loading }) {
                   </td>
 
                   <td className="px-6 py-4 text-sm text-slate-500">
-                    {formatDate(call.started_at)}
+                    {formatDate(
+                      call.started_at
+                    )}
                   </td>
                 </tr>
               ))}
 
-            {!loading && filteredCalls.length === 0 && (
-              <tr>
-                <td
-                  colSpan="9"
-                  className="px-6 py-12 text-center"
-                >
-                  <div className="text-sm font-semibold text-slate-700">
-                    No call history found
-                  </div>
+            {!loading &&
+              filteredCalls.length === 0 && (
+                <tr>
+                  <td
+                    colSpan="9"
+                    className="px-6 py-12 text-center"
+                  >
+                    <div className="text-sm font-semibold text-slate-700">
+                      No call history found
+                    </div>
 
-                  <div className="mt-1 text-xs text-slate-500">
-                    Try changing your search or status filter.
-                  </div>
-                </td>
-              </tr>
-            )}
+                    <div className="mt-1 text-xs text-slate-500">
+                      Try changing your search or
+                      status filter.
+                    </div>
+                  </td>
+                </tr>
+              )}
           </tbody>
         </table>
       </div>
@@ -805,21 +1142,28 @@ function CallHistoryPage({ calls, loading }) {
   );
 }
 
-
 /* =========================
    Callbacks
 ========================= */
 
-function CallbacksPage({ queue, loading }) {
+function CallbacksPage({
+  queue,
+  loading,
+}) {
   const callbacks = [...queue]
     .filter(
       (item) =>
-        item.callback_at || item.callback_status
+        item.callback_at ||
+        item.callback_status
     )
     .sort(
       (a, b) =>
-        new Date(a.callback_at || 0).getTime() -
-        new Date(b.callback_at || 0).getTime()
+        new Date(
+          a.callback_at || 0
+        ).getTime() -
+        new Date(
+          b.callback_at || 0
+        ).getTime()
     );
 
   return (
@@ -844,12 +1188,24 @@ function CallbacksPage({ queue, loading }) {
         <table className="w-full min-w-[900px] text-left">
           <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
             <tr>
-              <th className="px-6 py-3">Queue</th>
-              <th className="px-6 py-3">Lead ID</th>
-              <th className="px-6 py-3">Phone</th>
-              <th className="px-6 py-3">Callback Time</th>
-              <th className="px-6 py-3">Callback Status</th>
-              <th className="px-6 py-3">Queue Status</th>
+              <th className="px-6 py-3">
+                Queue
+              </th>
+              <th className="px-6 py-3">
+                Lead ID
+              </th>
+              <th className="px-6 py-3">
+                Phone
+              </th>
+              <th className="px-6 py-3">
+                Callback Time
+              </th>
+              <th className="px-6 py-3">
+                Callback Status
+              </th>
+              <th className="px-6 py-3">
+                Queue Status
+              </th>
             </tr>
           </thead>
 
@@ -872,31 +1228,38 @@ function CallbacksPage({ queue, loading }) {
                 </td>
 
                 <td className="px-6 py-4 text-sm text-slate-600">
-                  {formatDate(item.callback_at)}
+                  {formatDate(
+                    item.callback_at
+                  )}
                 </td>
 
                 <td className="px-6 py-4">
                   <StatusBadge
-                    status={item.callback_status}
+                    status={
+                      item.callback_status
+                    }
                   />
                 </td>
 
                 <td className="px-6 py-4">
-                  <StatusBadge status={item.status} />
+                  <StatusBadge
+                    status={item.status}
+                  />
                 </td>
               </tr>
             ))}
 
-            {!loading && callbacks.length === 0 && (
-              <tr>
-                <td
-                  colSpan="6"
-                  className="px-6 py-10 text-center text-sm text-slate-500"
-                >
-                  No callbacks scheduled
-                </td>
-              </tr>
-            )}
+            {!loading &&
+              callbacks.length === 0 && (
+                <tr>
+                  <td
+                    colSpan="6"
+                    className="px-6 py-10 text-center text-sm text-slate-500"
+                  >
+                    No callbacks scheduled
+                  </td>
+                </tr>
+              )}
           </tbody>
         </table>
       </div>
@@ -917,13 +1280,29 @@ function App() {
   const [calls, setCalls] = useState([]);
   const [queue, setQueue] = useState([]);
 
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [processingCall, setProcessingCall] = useState(false);
-  const [error, setError] = useState("");
-  const [lastUpdated, setLastUpdated] = useState(null);
+  const [loading, setLoading] =
+    useState(true);
 
-  const loadDashboard = async (isManualRefresh = false) => {
+  const [refreshing, setRefreshing] =
+    useState(false);
+
+  const [processingCall, setProcessingCall] =
+    useState(false);
+
+  const [processingQueueId, setProcessingQueueId] =
+    useState(null);
+
+  const [error, setError] = useState("");
+  const [lastUpdated, setLastUpdated] =
+    useState(null);
+
+  /* =========================
+     Load Dashboard
+  ========================= */
+
+  const loadDashboard = async (
+    isManualRefresh = false
+  ) => {
     try {
       if (isManualRefresh) {
         setRefreshing(true);
@@ -937,10 +1316,18 @@ function App() {
         callsRes,
         queueRes,
       ] = await Promise.all([
-        fetch(`${API_BASE}/api/v1/dashboard/stats`),
-        fetch(`${API_BASE}/api/v1/leads`),
-        fetch(`${API_BASE}/api/v1/call-attempts`),
-        fetch(`${API_BASE}/api/v1/call-queue`),
+        fetch(
+          `${API_BASE}/api/v1/dashboard/stats`
+        ),
+        fetch(
+          `${API_BASE}/api/v1/leads`
+        ),
+        fetch(
+          `${API_BASE}/api/v1/call-attempts`
+        ),
+        fetch(
+          `${API_BASE}/api/v1/call-queue`
+        ),
       ]);
 
       if (
@@ -954,14 +1341,30 @@ function App() {
         );
       }
 
-      const statsData = await statsRes.json();
-      const leadsData = await leadsRes.json();
-      const callsData = await callsRes.json();
-      const queueData = await queueRes.json();
+      const statsData =
+        await statsRes.json();
 
-      setStats(statsData.stats || null);
-      setLeads(leadsData.leads || []);
-      setCalls(callsData.call_attempts || []);
+      const leadsData =
+        await leadsRes.json();
+
+      const callsData =
+        await callsRes.json();
+
+      const queueData =
+        await queueRes.json();
+
+      setStats(
+        statsData.stats || null
+      );
+
+      setLeads(
+        leadsData.leads || []
+      );
+
+      setCalls(
+        callsData.call_attempts || []
+      );
+
       setQueue(
         queueData.call_queue ||
           queueData.queue ||
@@ -980,6 +1383,10 @@ function App() {
     }
   };
 
+  /* =========================
+     Process Next Queue Call
+  ========================= */
+
   const processNextCall = async () => {
     try {
       setProcessingCall(true);
@@ -992,9 +1399,13 @@ function App() {
         }
       );
 
-      const data = await response.json();
+      const data =
+        await response.json();
 
-      if (!response.ok || data.success === false) {
+      if (
+        !response.ok ||
+        data.success === false
+      ) {
         throw new Error(
           data.message ||
             "Failed to process next call"
@@ -1012,6 +1423,52 @@ function App() {
     }
   };
 
+  /* =========================
+     Process Specific Queue
+  ========================= */
+
+  const processQueueCall = async (
+    queueId
+  ) => {
+    try {
+      setProcessingQueueId(queueId);
+      setError("");
+
+      const response = await fetch(
+        `${API_BASE}/api/v1/dialer/process/${queueId}`,
+        {
+          method: "POST",
+        }
+      );
+
+      const data =
+        await response.json();
+
+      if (
+        !response.ok ||
+        data.success === false
+      ) {
+        throw new Error(
+          data.message ||
+            `Failed to process queue #${queueId}`
+        );
+      }
+
+      await loadDashboard(true);
+    } catch (err) {
+      setError(
+        err.message ||
+          "Unable to process queue call"
+      );
+    } finally {
+      setProcessingQueueId(null);
+    }
+  };
+
+  /* =========================
+     Auto Refresh
+  ========================= */
+
   useEffect(() => {
     loadDashboard();
 
@@ -1019,8 +1476,14 @@ function App() {
       loadDashboard();
     }, 15000);
 
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+    };
   }, []);
+
+  /* =========================
+     Navigation
+  ========================= */
 
   const navigation = [
     {
@@ -1077,6 +1540,10 @@ function App() {
     },
   };
 
+  /* =========================
+     Render Active Page
+  ========================= */
+
   const renderPage = () => {
     if (activePage === "leads") {
       return (
@@ -1092,6 +1559,12 @@ function App() {
         <CallQueuePage
           queue={queue}
           loading={loading}
+          onProcessQueueCall={
+            processQueueCall
+          }
+          processingQueueId={
+            processingQueueId
+          }
         />
       );
     }
@@ -1124,18 +1597,17 @@ function App() {
     );
   };
 
-  const backendConnected = !error && !loading;
+  const backendConnected =
+    !error && !loading;
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
-
       {/* =========================
           Desktop Sidebar
       ========================= */}
 
       <aside className="fixed hidden h-screen w-64 border-r border-slate-200 bg-white lg:block">
         <div className="flex h-full flex-col">
-
           <div className="border-b border-slate-200 px-6 py-6">
             <h1 className="text-xl font-bold tracking-tight">
               AI Auto Dialer
@@ -1199,26 +1671,25 @@ function App() {
       ========================= */}
 
       <main className="lg:ml-64">
-
         {/* Header */}
 
         <header className="border-b border-slate-200 bg-white">
           <div className="px-6 py-5 lg:px-8">
-
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-
               <div>
                 <h2 className="text-2xl font-bold">
                   {pageTitles[activePage].title}
                 </h2>
 
                 <p className="mt-1 text-sm text-slate-500">
-                  {pageTitles[activePage].subtitle}
+                  {
+                    pageTitles[activePage]
+                      .subtitle
+                  }
                 </p>
               </div>
 
               <div className="flex items-center gap-3">
-
                 {lastUpdated && (
                   <span className="hidden text-xs text-slate-400 md:block">
                     Updated{" "}
@@ -1230,11 +1701,15 @@ function App() {
                   onClick={processNextCall}
                   disabled={
                     processingCall ||
+                    processingQueueId !==
+                      null ||
                     refreshing ||
                     loading
                   }
                   className={`rounded-xl px-4 py-2.5 text-sm font-semibold text-white transition ${
                     processingCall ||
+                    processingQueueId !==
+                      null ||
                     refreshing ||
                     loading
                       ? "cursor-not-allowed bg-slate-400"
@@ -1252,11 +1727,15 @@ function App() {
                   }
                   disabled={
                     refreshing ||
-                    processingCall
+                    processingCall ||
+                    processingQueueId !==
+                      null
                   }
                   className={`rounded-xl px-4 py-2.5 text-sm font-semibold text-white transition ${
                     refreshing ||
-                    processingCall
+                    processingCall ||
+                    processingQueueId !==
+                      null
                       ? "cursor-not-allowed bg-slate-400"
                       : "bg-slate-900 hover:bg-slate-800"
                   }`}
@@ -1293,7 +1772,6 @@ function App() {
         {/* Content */}
 
         <div className="space-y-8 p-6 lg:p-8">
-
           {error && (
             <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
               <div className="font-semibold">
