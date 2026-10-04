@@ -380,6 +380,7 @@ def get_call_attempts(
                 "status": attempt.status,
                 "started_at": attempt.started_at,
                 "ended_at": attempt.ended_at,
+                "duration_seconds": attempt.duration_seconds,
                 "result": attempt.result,
                 "failure_reason": attempt.failure_reason,
                 "provider": attempt.provider,
