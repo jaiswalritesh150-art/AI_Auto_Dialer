@@ -255,6 +255,7 @@ def dashboard_stats(
     average_duration = (
         db.query(func.avg(CallAttempt.duration_seconds))
         .filter(
+            CallAttempt.status == "completed",
             CallAttempt.duration_seconds.isnot(None)
         )
         .scalar()
