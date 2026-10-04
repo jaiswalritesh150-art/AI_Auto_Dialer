@@ -823,6 +823,7 @@ function App() {
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [processingCall, setProcessingCall] = useState(false);
   const [error, setError] = useState("");
   const [lastUpdated, setLastUpdated] = useState(null);
 
@@ -880,6 +881,38 @@ function App() {
     } finally {
       setLoading(false);
       setRefreshing(false);
+    }
+  };
+
+  const processNextCall = async () => {
+    try {
+      setProcessingCall(true);
+      setError("");
+
+      const response = await fetch(
+        `${API_BASE}/api/v1/dialer/process-next`,
+        {
+          method: "POST",
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok || data.success === false) {
+        throw new Error(
+          data.message ||
+            "Failed to process next call"
+        );
+      }
+
+      await loadDashboard(true);
+    } catch (err) {
+      setError(
+        err.message ||
+          "Unable to process next call"
+      );
+    } finally {
+      setProcessingCall(false);
     }
   };
 
@@ -1098,12 +1131,36 @@ function App() {
                 )}
 
                 <button
+                  onClick={processNextCall}
+                  disabled={
+                    processingCall ||
+                    refreshing ||
+                    loading
+                  }
+                  className={`rounded-xl px-4 py-2.5 text-sm font-semibold text-white transition ${
+                    processingCall ||
+                    refreshing ||
+                    loading
+                      ? "cursor-not-allowed bg-slate-400"
+                      : "bg-emerald-600 hover:bg-emerald-700"
+                  }`}
+                >
+                  {processingCall
+                    ? "Processing..."
+                    : "Process Next Call"}
+                </button>
+
+                <button
                   onClick={() =>
                     loadDashboard(true)
                   }
-                  disabled={refreshing}
+                  disabled={
+                    refreshing ||
+                    processingCall
+                  }
                   className={`rounded-xl px-4 py-2.5 text-sm font-semibold text-white transition ${
-                    refreshing
+                    refreshing ||
+                    processingCall
                       ? "cursor-not-allowed bg-slate-400"
                       : "bg-slate-900 hover:bg-slate-800"
                   }`}
