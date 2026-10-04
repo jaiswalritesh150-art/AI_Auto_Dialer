@@ -112,16 +112,9 @@ def process_next_call(db: Session):
         attempt.failure_reason = call.get("message")
         attempt.ended_at = datetime.utcnow()
 
-        # Calculate duration for failed attempt
-        if attempt.started_at and attempt.ended_at:
-            attempt.duration_seconds = max(
-                0,
-                int(
-                    (
-                        attempt.ended_at - attempt.started_at
-                    ).total_seconds()
-                )
-            )
+        # Provider call was not established,
+        # so this is not a real call duration.
+        attempt.duration_seconds = 0
 
         retryable = call.get("retryable", False)
 
@@ -152,6 +145,7 @@ def process_next_call(db: Session):
         db.commit()
 
         return {
+            "success": False,
             "queue_id": queue_item.id,
             "phone": queue_item.phone,
             "queue_status": queue_item.status,
@@ -175,6 +169,7 @@ def process_next_call(db: Session):
     db.refresh(attempt)
 
     return {
+        "success": True,
         "queue_id": queue_item.id,
         "phone": queue_item.phone,
         "queue_status": queue_item.status,
@@ -279,16 +274,9 @@ def process_specific_call(
         attempt.failure_reason = call.get("message")
         attempt.ended_at = datetime.utcnow()
 
-        # Calculate duration for failed attempt
-        if attempt.started_at and attempt.ended_at:
-            attempt.duration_seconds = max(
-                0,
-                int(
-                    (
-                        attempt.ended_at - attempt.started_at
-                    ).total_seconds()
-                )
-            )
+        # Provider call was not established,
+        # so this is not a real call duration.
+        attempt.duration_seconds = 0
 
         retryable = call.get("retryable", False)
 
