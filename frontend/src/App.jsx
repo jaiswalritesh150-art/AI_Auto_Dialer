@@ -625,24 +625,89 @@ function CallQueuePage({ queue, loading }) {
 ========================= */
 
 function CallHistoryPage({ calls, loading }) {
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+
   const sortedCalls = [...calls].sort(
     (a, b) => Number(b.id || 0) - Number(a.id || 0)
   );
 
+  const filteredCalls = sortedCalls.filter((call) => {
+    const searchText = search.trim().toLowerCase();
+
+    const matchesSearch =
+      !searchText ||
+      String(call.id || "").toLowerCase().includes(searchText) ||
+      String(call.queue_id || "").toLowerCase().includes(searchText) ||
+      String(call.provider || "").toLowerCase().includes(searchText) ||
+      String(call.result || "").toLowerCase().includes(searchText) ||
+      String(call.failure_reason || "").toLowerCase().includes(searchText) ||
+      String(call.provider_call_id || "")
+        .toLowerCase()
+        .includes(searchText);
+
+    const matchesStatus =
+      statusFilter === "all" ||
+      String(call.status || "").toLowerCase() === statusFilter;
+
+    return matchesSearch && matchesStatus;
+  });
+
+  const statusOptions = [
+    { value: "all", label: "All Status" },
+    { value: "completed", label: "Completed" },
+    { value: "failed", label: "Failed" },
+    { value: "started", label: "Started" },
+    { value: "initiated", label: "Initiated" },
+  ];
+
   return (
     <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
       <div className="border-b border-slate-200 px-6 py-5">
-        <h3 className="text-lg font-bold">
-          Call History
-        </h3>
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <h3 className="text-lg font-bold">
+              Call History
+            </h3>
 
-        <p className="mt-1 text-sm text-slate-500">
-          Complete dialer call activity
-        </p>
+            <p className="mt-1 text-sm text-slate-500">
+              Review complete dialer call activity
+            </p>
+          </div>
+
+          <div className="rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-600">
+            {filteredCalls.length} of {calls.length} attempts
+          </div>
+        </div>
+
+        <div className="mt-5 flex flex-col gap-3 md:flex-row">
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by ID, queue, provider, result..."
+            className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:ring-2 focus:ring-slate-100 md:flex-1"
+          />
+
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-100"
+          >
+            {statusOptions.map((option) => (
+              <option
+                key={option.value}
+                value={option.value}
+              >
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[1000px] text-left">
+        <table className="w-full min-w-[1250px] text-left">
           <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
             <tr>
               <th className="px-6 py-3">Attempt</th>
@@ -652,54 +717,84 @@ function CallHistoryPage({ calls, loading }) {
               <th className="px-6 py-3">Status</th>
               <th className="px-6 py-3">Result</th>
               <th className="px-6 py-3">Duration</th>
+              <th className="px-6 py-3">Failure Reason</th>
+              <th className="px-6 py-3">Started</th>
             </tr>
           </thead>
 
           <tbody className="divide-y divide-slate-100">
-            {sortedCalls.map((call) => (
-              <tr
-                key={call.id}
-                className="transition hover:bg-slate-50"
-              >
-                <td className="px-6 py-4 font-semibold">
-                  #{call.id}
-                </td>
-
-                <td className="px-6 py-4 text-sm text-slate-600">
-                  #{call.queue_id}
-                </td>
-
-                <td className="px-6 py-4 text-sm text-slate-600">
-                  {call.attempt_number ?? "—"}
-                </td>
-
-                <td className="px-6 py-4 text-sm text-slate-600">
-                  {call.provider || "—"}
-                </td>
-
-                <td className="px-6 py-4">
-                  <StatusBadge status={call.status} />
-                </td>
-
-                <td className="px-6 py-4 text-sm text-slate-600">
-                  {call.result ||
-                    call.failure_reason ||
-                    "—"}
-                </td>
-
-                <td className="px-6 py-4 text-sm text-slate-600">
-                  {formatDuration(call.duration_seconds)}
-                </td>
-              </tr>
-            ))}
-
-            {!loading && calls.length === 0 && (
+            {loading && (
               <tr>
                 <td
-                  colSpan="7"
+                  colSpan="9"
                   className="px-6 py-10 text-center text-sm text-slate-500"
                 >
-                  No call history found
+                  Loading call history...
+                </td>
+              </tr>
+            )}
+
+            {!loading &&
+              filteredCalls.map((call) => (
+                <tr
+                  key={call.id}
+                  className="transition hover:bg-slate-50"
+                >
+                  <td className="px-6 py-4 font-semibold">
+                    #{call.id}
+                  </td>
+
+                  <td className="px-6 py-4 text-sm text-slate-600">
+                    #{call.queue_id ?? "—"}
+                  </td>
+
+                  <td className="px-6 py-4 text-sm font-medium text-slate-700">
+                    {call.attempt_number ?? "—"}
+                  </td>
+
+                  <td className="px-6 py-4 text-sm text-slate-600">
+                    {call.provider || "—"}
+                  </td>
+
+                  <td className="px-6 py-4">
+                    <StatusBadge
+                      status={call.status}
+                    />
+                  </td>
+
+                  <td className="px-6 py-4 text-sm text-slate-600">
+                    {call.result || "—"}
+                  </td>
+
+                  <td className="px-6 py-4 text-sm font-medium text-slate-700">
+                    {formatDuration(
+                      call.duration_seconds
+                    )}
+                  </td>
+
+                  <td className="max-w-xs px-6 py-4 text-sm text-slate-500">
+                    {call.failure_reason || "—"}
+                  </td>
+
+                  <td className="px-6 py-4 text-sm text-slate-500">
+                    {formatDate(call.started_at)}
+                  </td>
+                </tr>
+              ))}
+
+            {!loading && filteredCalls.length === 0 && (
+              <tr>
+                <td
+                  colSpan="9"
+                  className="px-6 py-12 text-center"
+                >
+                  <div className="text-sm font-semibold text-slate-700">
+                    No call history found
+                  </div>
+
+                  <div className="mt-1 text-xs text-slate-500">
+                    Try changing your search or status filter.
+                  </div>
                 </td>
               </tr>
             )}
@@ -709,6 +804,7 @@ function CallHistoryPage({ calls, loading }) {
     </section>
   );
 }
+
 
 /* =========================
    Callbacks
