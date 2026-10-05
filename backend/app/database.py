@@ -1,7 +1,17 @@
+import os
+
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
+from dotenv import load_dotenv
 
-DATABASE_URL = "postgresql+psycopg2://postgres:postgres123@localhost:5434/ai_auto_dialer"
+
+load_dotenv()
+
+
+DATABASE_URL = os.getenv(
+    "DATABASE_URL",
+    "postgresql+psycopg2://postgres:postgres123@localhost:5434/ai_auto_dialer"
+)
 
 
 engine = create_engine(DATABASE_URL)
@@ -25,4 +35,3 @@ def get_db():
 
     finally:
         db.close()
-
