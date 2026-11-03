@@ -383,5 +383,3 @@ Possible future improvements include:
 
 **Ritesh Jaiswal**
 
-AI/ML Engineering Student
-Generative AI | FastAPI | React | Automation
