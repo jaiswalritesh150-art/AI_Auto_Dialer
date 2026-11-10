@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, Body
+﻿from fastapi import FastAPI, Depends, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import asyncio
@@ -554,7 +554,7 @@ async def zoho_lead_webhook(
     zoho_lead_id = lead.lead_id
 
     # =================================================
-    # STEP 1 — PHONE VALIDATION
+    # STEP 1 ΓÇö PHONE VALIDATION
     # =================================================
 
     phone_validation = validate_phone(
@@ -585,7 +585,7 @@ async def zoho_lead_webhook(
     )
 
     # =================================================
-    # STEP 2 — DUPLICATE CHECK
+    # STEP 2 ΓÇö DUPLICATE CHECK
     # =================================================
 
     existing_lead = (
@@ -609,7 +609,7 @@ async def zoho_lead_webhook(
         }
 
     # =================================================
-    # STEP 3 — LEAD SCORING
+    # STEP 3 ΓÇö LEAD SCORING
     # =================================================
 
     lead_score, priority = calculate_lead_score(
@@ -621,7 +621,7 @@ async def zoho_lead_webhook(
     print("Priority:", priority)
 
     # =================================================
-    # STEP 4 — CREATE LEAD
+    # STEP 4 ΓÇö CREATE LEAD
     # =================================================
 
     new_lead = Lead(
@@ -638,7 +638,7 @@ async def zoho_lead_webhook(
     )
 
     # =================================================
-    # STEP 5 — SAVE TO POSTGRESQL
+    # STEP 5 ΓÇö SAVE TO POSTGRESQL
     # =================================================
 
     db.add(new_lead)
@@ -655,7 +655,7 @@ async def zoho_lead_webhook(
     print(f"Priority: {new_lead.priority}")
 
     # =================================================
-    # STEP 6 — ADD TO DIALER QUEUE
+    # STEP 6 ΓÇö ADD TO DIALER QUEUE
     # =================================================
 
     dialer_data = queue_lead(
@@ -1539,30 +1539,33 @@ def ai_call(
 # AI CALL MESSAGE
 # =====================================================
 
+
 @app.post("/api/v1/telephony/ai-call/{queue_id}/message")
 def ai_call_message(
     queue_id: int,
     request: AIConversationRequest,
     db: Session = Depends(get_db)
 ):
-
     # =================================================
     # FIND QUEUE
     # =================================================
 
     queue_item = (
         db.query(CallQueue)
-        .filter(
-            CallQueue.id == queue_id
-        )
+        .filter(CallQueue.id == queue_id)
         .first()
     )
 
     if not queue_item:
-
         raise HTTPException(
             status_code=404,
             detail="Call queue item not found"
+        )
+
+    if queue_item.status in ("completed", "failed", "cancelled"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Call is already {queue_item.status}"
         )
 
     # =================================================
@@ -1571,14 +1574,11 @@ def ai_call_message(
 
     lead = (
         db.query(Lead)
-        .filter(
-            Lead.id == queue_item.lead_id
-        )
+        .filter(Lead.id == queue_item.lead_id)
         .first()
     )
 
     if not lead:
-
         raise HTTPException(
             status_code=404,
             detail="Lead not found"
@@ -1590,29 +1590,26 @@ def ai_call_message(
 
     attempt = (
         db.query(CallAttempt)
-        .filter(
-            CallAttempt.queue_id == queue_id
-        )
-        .order_by(
-            CallAttempt.attempt_number.desc()
-        )
+        .filter(CallAttempt.queue_id == queue_id)
+        .order_by(CallAttempt.attempt_number.desc())
         .first()
     )
 
     if not attempt:
-
         raise HTTPException(
             status_code=400,
             detail="No call attempt found"
         )
 
-    # =================================================
-    # CONVERSATION
-    # =================================================
+    if attempt.status == "completed":
+        raise HTTPException(
+            status_code=409,
+            detail="Call attempt is already completed"
+        )
 
-    conversation = list(
-        request.conversation
-    )
+    # =================================================
+    # LOAD PREVIOUS CONVERSATION
+    # =================================================
 
     previous_intelligence = (
         db.query(CallIntelligence)
@@ -1620,51 +1617,43 @@ def ai_call_message(
             CallIntelligence.queue_id == queue_id,
             CallIntelligence.attempt_id == attempt.id
         )
-        .order_by(
-            CallIntelligence.id.desc()
-        )
+        .order_by(CallIntelligence.id.desc())
         .first()
     )
+
+    conversation = []
 
     if (
         previous_intelligence
         and previous_intelligence.transcript
     ):
-
-        previous_lines = (
-            previous_intelligence.transcript.split("\n")
-        )
-
-        conversation = []
-
-        for line in previous_lines:
+        for line in previous_intelligence.transcript.split("\n"):
 
             if line.startswith("Lead: "):
-
                 conversation.append({
                     "role": "user",
-                    "text": line.replace(
-                        "Lead: ",
-                        "",
-                        1
-                    )
+                    "text": line[len("Lead: "):]
                 })
 
             elif line.startswith("AI Agent: "):
-
                 conversation.append({
                     "role": "model",
-                    "text": line.replace(
-                        "AI Agent: ",
-                        "",
-                        1
-                    )
+                    "text": line[len("AI Agent: "):]
                 })
 
-    conversation.append({
-        "role": "user",
-        "text": request.message
-    })
+    else:
+        conversation = list(request.conversation)
+
+    # Avoid appending an identical last user message twice.
+    if not (
+        conversation
+        and conversation[-1].get("role") in ("user", "lead")
+        and conversation[-1].get("text") == request.message
+    ):
+        conversation.append({
+            "role": "user",
+            "text": request.message
+        })
 
     # =================================================
     # LEAD CONTEXT
@@ -1683,22 +1672,16 @@ def ai_call_message(
     # =================================================
 
     try:
-
         ai_response = generate_response(
             conversation=conversation,
             lead_context=lead_context
         )
 
     except Exception as exc:
-
         raise HTTPException(
             status_code=500,
             detail=f"AI response failed: {str(exc)}"
         )
-
-    # =================================================
-    # ADD AI RESPONSE
-    # =================================================
 
     conversation.append({
         "role": "model",
@@ -1710,26 +1693,18 @@ def ai_call_message(
     # =================================================
 
     try:
-
         decision = detect_call_decision(
             conversation=conversation,
             lead_context=lead_context
         )
 
     except Exception as exc:
-
         raise HTTPException(
             status_code=500,
-            detail=(
-                "Call decision detection failed: "
-                f"{str(exc)}"
-            )
+            detail=f"Call decision detection failed: {str(exc)}"
         )
 
-    decision_type = decision.get(
-        "decision",
-        "continue"
-    )
+    decision_type = decision.get("decision", "review_required")
 
     # =================================================
     # BUILD TRANSCRIPT
@@ -1738,71 +1713,81 @@ def ai_call_message(
     transcript_lines = []
 
     for message in conversation:
+        role = message.get("role", "user")
 
-        role = message.get(
-            "role",
-            "user"
+        speaker = (
+            "AI Agent"
+            if role in ("assistant", "model")
+            else "Lead"
         )
-
-        if role == "user":
-
-            speaker = "Lead"
-
-        else:
-
-            speaker = "AI Agent"
 
         transcript_lines.append(
-            f"{speaker}: "
-            f"{message.get('text', '')}"
+            f"{speaker}: {message.get('text', '')}"
         )
 
-    transcript = "\n".join(
-        transcript_lines
-    )
-
-    # =================================================
-    # PROVISIONAL CALL INTELLIGENCE
-    # =================================================
+    transcript = "\n".join(transcript_lines)
 
     analysis = {
-        "summary": decision.get("reason", "Conversation continued."),
+        "summary": decision.get("reason", ""),
         "sentiment": "neutral",
         "outcome": decision_type
     }
-    
-    # =================================================
-    # SAVE CALL INTELLIGENCE
-    # =================================================
-
-    intelligence = CallIntelligence(
-        queue_id=queue_id,
-        attempt_id=attempt.id,
-        transcript=transcript,
-        summary=analysis.get("summary"),
-        sentiment=analysis.get("sentiment"),
-        outcome=analysis.get("outcome")
-    )
-
-    db.add(intelligence)
-
-    db.commit()
-
-    db.refresh(intelligence)
 
     # =================================================
-    # AUTOMATIC CALL CONTROL
+    # SAVE OR UPDATE CALL INTELLIGENCE
     # =================================================
 
-    terminal_decisions = {
-        "callback_requested",
-        "not_interested",
-        "converted",
-        "no_further_contact"
-    }
+    intelligence = previous_intelligence
+
+    if intelligence is None:
+        intelligence = CallIntelligence(
+            queue_id=queue_id,
+            attempt_id=attempt.id,
+            transcript=transcript,
+            summary=analysis["summary"],
+            sentiment=analysis["sentiment"],
+            outcome=decision_type
+        )
+
+        db.add(intelligence)
+
+    else:
+        intelligence.transcript = transcript
+        intelligence.summary = analysis["summary"]
+        intelligence.sentiment = analysis["sentiment"]
+        intelligence.outcome = decision_type
 
     # =================================================
-    # AUTOMATIC CALLBACK SCHEDULING
+    # REVIEW REQUIRED â€” DO NOT AUTO-COMPLETE
+    # =================================================
+
+    if decision_type == "review_required":
+        db.commit()
+        db.refresh(intelligence)
+
+        return {
+            "status": "review_required",
+            "message": (
+                "AI could not reliably classify the conversation. "
+                "Manual review is required."
+            ),
+            "call": {
+                "queue_id": queue_id,
+                "attempt_id": attempt.id,
+                "call_ended": False,
+                "ai_response": ai_response,
+                "conversation": conversation
+            },
+            "decision": decision,
+            "intelligence": {
+                "id": intelligence.id,
+                "outcome": intelligence.outcome,
+                "summary": intelligence.summary
+            }
+        }
+
+    # =================================================
+    # CALLBACK SCHEDULING
     # =================================================
 
     callback_scheduled = False
@@ -1813,80 +1798,128 @@ def ai_call_message(
         callback_text = "\n".join(
             message.get("text", "")
             for message in conversation
+            if message.get("role") in ("user", "lead")
         )
 
-        callback_at = extract_callback_time(
-            callback_text
-        )
+        callback_at = extract_callback_time(callback_text)
 
-        if callback_at:
+        if callback_at is None:
+            intelligence.outcome = "callback_time_required"
 
+            db.commit()
+            db.refresh(intelligence)
+
+            return {
+                "status": "success",
+                "message": (
+                    "Callback requested. A specific date and time "
+                    "is needed before scheduling."
+                ),
+                "call": {
+                    "queue_id": queue_id,
+                    "attempt_id": attempt.id,
+                    "call_ended": False,
+                    "ai_response": ai_response,
+                    "conversation": conversation
+                },
+                "decision": decision,
+                "callback": {
+                    "scheduled": False,
+                    "callback_at": None,
+                    "time_required": True
+                }
+            }
+
+        try:
             callback_result = schedule_callback(
                 queue_id=queue_id,
                 callback_at=callback_at,
                 db=db
             )
 
-            callback_scheduled = callback_result.get(
-                "success",
-                False
+            callback_scheduled = (
+                callback_result.get("success", False)
             )
 
+        except Exception:
+            db.rollback()
+            raise
+
+        if not callback_scheduled:
+            db.refresh(queue_item)
+
+            return {
+                "status": "error",
+                "message": "Callback could not be scheduled.",
+                "call": {
+                    "queue_id": queue_id,
+                    "attempt_id": attempt.id,
+                    "call_ended": False
+                },
+                "callback": callback_result
+            }
+
     # =================================================
-    # CALL END CONTROL
+    # TERMINAL DECISIONS
     # =================================================
+
+    terminal_decisions = {
+        "callback_requested",
+        "not_interested",
+        "converted",
+        "no_further_contact"
+    }
 
     call_ended = False
+    crm_result = None
 
-    if (
-        decision_type in terminal_decisions
-        and decision_type != "callback_requested"
-    ):
+    if decision_type in terminal_decisions:
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
 
         attempt.status = "completed"
-
         attempt.result = decision_type
-
         attempt.ended_at = now
-
         attempt.failure_reason = None
 
-        queue_item.status = "completed"
-
-        queue_item.completed_at = now
-
-        queue_item.failure_reason = None
+        # For callback requests, schedule_callback() owns
+        # callback queue-state management. Do not overwrite it.
+        if decision_type != "callback_requested":
+            queue_item.status = "completed"
+            queue_item.completed_at = now
+            queue_item.failure_reason = None
 
         # =================================================
         # UPDATE CRM
         # =================================================
 
-        crm_result = update_lead_after_call(
-            zoho_lead_id=lead.zoho_lead_id,
-            outcome=decision_type,
-            sentiment=(
-                analysis.get("sentiment")
-                or "neutral"
-            ),
-            summary=(
-                analysis.get("summary")
-                or ""
+        try:
+            crm_result = update_lead_after_call(
+                zoho_lead_id=lead.zoho_lead_id,
+                outcome=decision_type,
+                sentiment=analysis["sentiment"],
+                summary=analysis["summary"] or ""
             )
-        )
 
-        db.commit()
-
-        db.refresh(attempt)
-
-        db.refresh(queue_item)
+        except Exception as exc:
+            print(f"[AI_CALL] CRM update failed: {exc}")
+            crm_result = {
+                "success": False,
+                "message": "CRM update failed",
+                "error": str(exc)
+            }
 
         call_ended = True
 
-    else:
+    # =================================================
+    # SAVE DATABASE
+    # =================================================
 
-        crm_result = None
+    db.commit()
+
+    db.refresh(intelligence)
+    db.refresh(attempt)
+    db.refresh(queue_item)
 
     # =================================================
     # RESPONSE
@@ -1894,21 +1927,17 @@ def ai_call_message(
 
     return {
         "status": "success",
-
-        "message": (
-            "AI response, call intelligence "
-            "and decision saved successfully"
-        ),
+        "message": "AI conversation processed successfully",
 
         "call": {
-            "queue_id": queue_id,
+            "queue_id": queue_item.id,
             "attempt_id": attempt.id,
             "attempt_number": attempt.attempt_number,
             "phone": queue_item.phone,
             "lead_name": (
-                f"{lead.first_name} "
-                f"{lead.last_name}"
-            ),
+                f"{lead.first_name or ''} "
+                f"{lead.last_name or ''}"
+            ).strip(),
             "user_message": request.message,
             "ai_response": ai_response,
             "conversation": conversation,
@@ -1917,29 +1946,27 @@ def ai_call_message(
 
         "decision": {
             "decision": decision_type,
-            "reason": decision.get(
-                "reason",
-                ""
+            "reason": decision.get("reason", "")
+        },
+
+        "callback": {
+            "scheduled": callback_scheduled,
+            "callback_at": (
+                callback_at.isoformat()
+                if callback_at else None
             )
         },
 
         "intelligence": {
             "id": intelligence.id,
-            "transcript": intelligence.transcript,
             "summary": intelligence.summary,
             "sentiment": intelligence.sentiment,
             "outcome": intelligence.outcome,
-            "analyzed_at": intelligence.analyzed_at
+            "transcript": intelligence.transcript
         },
 
         "crm": crm_result
     }
-
-
-# =====================================================
-# END AI CALL + CRM UPDATE
-# =====================================================
-
 @app.post("/api/v1/telephony/ai-call/{queue_id}/end")
 def end_ai_call(
     queue_id: int,

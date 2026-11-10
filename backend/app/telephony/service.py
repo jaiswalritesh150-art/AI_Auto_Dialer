@@ -1,6 +1,8 @@
-from datetime import datetime
+
+from datetime import datetime, timezone
 from uuid import uuid4
 import os
+import re
 
 import requests
 from dotenv import load_dotenv
@@ -10,18 +12,15 @@ from dotenv import load_dotenv
 # ENVIRONMENT CONFIGURATION
 # =====================================================
 
-load_dotenv(
-    os.path.join(
+BASE_DIR = os.path.dirname(
+    os.path.dirname(
         os.path.dirname(
-            os.path.dirname(
-                os.path.dirname(
-                    os.path.dirname(__file__)
-                )
-            )
-        ),
-        ".env"
+            os.path.dirname(os.path.abspath(__file__))
+        )
     )
 )
+
+load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 
 # =====================================================
@@ -33,151 +32,229 @@ EXOTEL_API_TOKEN = os.getenv("EXOTEL_API_TOKEN")
 EXOTEL_ACCOUNT_SID = os.getenv("EXOTEL_ACCOUNT_SID")
 EXOTEL_CALLER_ID = os.getenv("EXOTEL_CALLER_ID")
 
-# This is your verified phone number.
-# Keep it only inside .env.
-EXOTEL_TEST_TO = os.getenv("EXOTEL_TEST_TO")
+# India region by default. Override only if your account
+# is hosted in another Exotel region.
+EXOTEL_BASE_URL = os.getenv(
+    "EXOTEL_BASE_URL",
+    "https://api.in.exotel.com"
+).rstrip("/")
 
-# Public webhook URL for Exotel call status callbacks.
-#
-# Example:
-# https://your-domain.com/api/v1/webhooks/exotel/call-status
-#
-# Do NOT put localhost here because Exotel cannot directly
-# reach your local machine.
+# Public WebSocket endpoint for Exotel AgentStream.
+# Example: wss://your-domain.com/api/v1/telephony/agentstream
+EXOTEL_STREAM_URL = os.getenv("EXOTEL_STREAM_URL")
+
+# Public HTTP endpoint for Exotel status callbacks.
 EXOTEL_STATUS_CALLBACK_URL = os.getenv(
     "EXOTEL_STATUS_CALLBACK_URL"
 )
 
-EXOTEL_BASE_URL = "https://api.exotel.com"
+# Keep mock as the safe default. Set live explicitly only
+# after credentials, stream endpoint and account are verified.
+TELEPHONY_MODE = os.getenv(
+    "TELEPHONY_MODE",
+    "mock"
+).strip().lower()
 
-# Telephony execution mode.
-# "live"  -> real Exotel API
-# "mock"  -> simulated call for development/testing
-TELEPHONY_MODE = os.getenv("TELEPHONY_MODE", "live").lower()
+EXOTEL_RECORD_CALLS = os.getenv(
+    "EXOTEL_RECORD_CALLS",
+    "false"
+).strip().lower() == "true"
+
+EXOTEL_TIME_LIMIT = int(
+    os.getenv("EXOTEL_TIME_LIMIT", "1800")
+)
+
+REQUEST_TIMEOUT = 30
 
 
 # =====================================================
-# INITIATE CALL
+# HELPERS
 # =====================================================
 
-def initiate_call(phone: str, queue_id: int, attempt_id: int):
+def utc_now():
+    return datetime.now(timezone.utc)
+
+
+def is_valid_e164(phone: str) -> bool:
+    """Validate an international E.164 phone number."""
+    if not phone:
+        return False
+
+    return bool(re.fullmatch(r"\+[1-9]\d{7,14}", phone.strip()))
+
+
+def exotel_configuration_error():
+    """Return a configuration error, or None if valid."""
+
+    required = {
+        "EXOTEL_API_KEY": EXOTEL_API_KEY,
+        "EXOTEL_API_TOKEN": EXOTEL_API_TOKEN,
+        "EXOTEL_ACCOUNT_SID": EXOTEL_ACCOUNT_SID,
+        "EXOTEL_CALLER_ID": EXOTEL_CALLER_ID,
+        "EXOTEL_STREAM_URL": EXOTEL_STREAM_URL,
+    }
+
+    missing = [
+        name for name, value in required.items()
+        if not value
+    ]
+
+    if missing:
+        return (
+            "Missing Exotel configuration: "
+            + ", ".join(missing)
+        )
+
+    if not EXOTEL_STREAM_URL.startswith("wss://"):
+        return "EXOTEL_STREAM_URL must use a public wss:// URL"
+
+    if len(EXOTEL_STREAM_URL) > 600:
+        return "EXOTEL_STREAM_URL must not exceed 600 characters"
+
+    return None
+
+
+def exotel_calls_url():
+    return (
+        f"{EXOTEL_BASE_URL}/v1/Accounts/"
+        f"{EXOTEL_ACCOUNT_SID}/Calls"
+    )
+
+
+# =====================================================
+# INITIATE OUTBOUND AI CALL
+# =====================================================
+
+def initiate_call(
+    phone: str,
+    queue_id: int,
+    attempt_id: int
+):
     """
-    Initiate an outbound call through Exotel.
+    Initiate an outbound AI call using Exotel Connect Voice AI.
 
-    phone:
-        Lead/customer phone number.
+    Exotel calls the customer number in `From`, displays
+    the ExoPhone in `CallerId`, and connects the answered
+    call to the public bidirectional AgentStream WebSocket.
 
-    EXOTEL_TEST_TO:
-        Verified phone number used as the second leg
-        during the initial API integration test.
-
-    EXOTEL_STATUS_CALLBACK_URL:
-        Public endpoint where Exotel sends terminal
-        call status updates.
+    Important:
+    This function starts the telephony call. It does not
+    implement the AgentStream WebSocket server itself.
     """
 
     # -------------------------------------------------
-    # MOCK TELEPHONY MODE
+    # MOCK MODE
     # -------------------------------------------------
 
     if TELEPHONY_MODE == "mock":
 
-        mock_call_id = (
-            f"MOCK-{uuid4().hex[:10].upper()}"
-        )
+        if not phone:
+            return {
+                "success": False,
+                "provider": "mock",
+                "message": "Phone number is required",
+                "retryable": False
+            }
 
         return {
             "success": True,
             "provider": "mock",
             "mode": "mock",
-            "call_id": mock_call_id,
+            "call_id": f"MOCK-{uuid4().hex[:12].upper()}",
             "queue_id": queue_id,
             "attempt_id": attempt_id,
             "phone": phone,
-            "to": phone,
             "caller_id": "MOCK_CALLER",
             "status": "initiated",
             "http_status": 200,
             "response": {
                 "message": "Mock call initiated successfully"
             },
-            "status_callback": None,
-            "initiated_at": datetime.utcnow()
+            "initiated_at": utc_now()
         }
 
     # -------------------------------------------------
-    # VALIDATE PHONE
+    # MODE VALIDATION
     # -------------------------------------------------
 
-    if not phone:
+    if TELEPHONY_MODE != "live":
         return {
             "success": False,
-            "message": "Phone number is required",
+            "message": (
+                "Invalid TELEPHONY_MODE. "
+                "Allowed values are mock or live."
+            ),
             "retryable": False
         }
 
     # -------------------------------------------------
-    # VALIDATE EXOTEL CONFIGURATION
+    # PHONE VALIDATION
     # -------------------------------------------------
 
-    if (
-        not EXOTEL_API_KEY
-        or not EXOTEL_API_TOKEN
-        or not EXOTEL_ACCOUNT_SID
-        or not EXOTEL_CALLER_ID
-    ):
+    if not is_valid_e164(phone):
         return {
             "success": False,
-            "message": "Exotel configuration is incomplete",
+            "provider": "exotel",
+            "message": (
+                "Invalid phone number. "
+                "Use E.164 format, for example +919876543210."
+            ),
             "retryable": False
         }
 
     # -------------------------------------------------
-    # VALIDATE TEST NUMBER
+    # EXOTEL CONFIGURATION VALIDATION
     # -------------------------------------------------
 
-    if not EXOTEL_TEST_TO:
+    config_error = exotel_configuration_error()
+
+    if config_error:
         return {
             "success": False,
-            "message": "EXOTEL_TEST_TO is not configured",
+            "provider": "exotel",
+            "mode": "live",
+            "queue_id": queue_id,
+            "attempt_id": attempt_id,
+            "message": config_error,
             "retryable": False
         }
 
     # -------------------------------------------------
-    # EXOTEL OUTBOUND CALL ENDPOINT
+    # CONNECT VOICE AI API
     # -------------------------------------------------
 
-    exotel_url = (
-        f"{EXOTEL_BASE_URL}"
-        f"/v1/Accounts/{EXOTEL_ACCOUNT_SID}"
-        f"/Calls/connect"
+    url = (
+        f"{EXOTEL_BASE_URL}/v1/Accounts/"
+        f"{EXOTEL_ACCOUNT_SID}/Calls/connect"
     )
 
-    # -------------------------------------------------
-    # EXOTEL PARAMETERS
-    # -------------------------------------------------
+    # Exotel Connect Voice AI API:
+    # From       = customer number to dial
+    # CallerId   = Exotel virtual number
+    # StreamUrl  = public AgentStream WebSocket
+    # StreamType = bidirectional
 
     payload = {
         "From": phone,
-        "To": EXOTEL_TEST_TO,
-        "CallerId": EXOTEL_CALLER_ID
+        "CallerId": EXOTEL_CALLER_ID,
+        "StreamUrl": EXOTEL_STREAM_URL,
+        "StreamType": "bidirectional",
+        "TimeLimit": EXOTEL_TIME_LIMIT,
+        "CustomField": f"queue:{queue_id};attempt:{attempt_id}",
+        "Record": str(EXOTEL_RECORD_CALLS).lower()
     }
-
-    # -------------------------------------------------
-    # STATUS CALLBACK
-    # -------------------------------------------------
 
     if EXOTEL_STATUS_CALLBACK_URL:
         payload["StatusCallback"] = EXOTEL_STATUS_CALLBACK_URL
         payload["StatusCallbackEvents[]"] = "terminal"
 
     # -------------------------------------------------
-    # MAKE ACTUAL API REQUEST
+    # API REQUEST
     # -------------------------------------------------
 
     try:
         response = requests.post(
-            exotel_url,
+            url,
             auth=(
                 EXOTEL_API_KEY,
                 EXOTEL_API_TOKEN
@@ -186,92 +263,106 @@ def initiate_call(phone: str, queue_id: int, attempt_id: int):
             headers={
                 "Accept": "application/json"
             },
-            timeout=30
+            timeout=REQUEST_TIMEOUT
         )
-
-        # -------------------------------------------------
-        # PARSE RESPONSE
-        # -------------------------------------------------
 
         try:
             response_data = response.json()
         except ValueError:
-            response_data = response.text
-
-        # -------------------------------------------------
-        # SUCCESS
-        # -------------------------------------------------
-
-        if response.ok:
-
-            call_id = None
-
-            # Exotel normally returns:
-            #
-            # {
-            #   "Call": {
-            #       "Sid": "..."
-            #   }
-            # }
-            #
-            if isinstance(response_data, dict):
-
-                call_info = response_data.get(
-                    "Call",
-                    {}
-                )
-
-                if isinstance(call_info, dict):
-                    call_id = call_info.get("Sid")
-
-            # -------------------------------------------------
-            # FALLBACK CALL ID
-            # -------------------------------------------------
-
-            if not call_id:
-                call_id = (
-                    f"CALL-{uuid4().hex[:10].upper()}"
-                )
-
-            return {
-                "success": True,
-                "provider": "exotel",
-                "mode": "live",
-                "call_id": call_id,
-                "queue_id": queue_id,
-                "attempt_id": attempt_id,
-                "phone": phone,
-                "to": EXOTEL_TEST_TO,
-                "caller_id": EXOTEL_CALLER_ID,
-                "status": "initiated",
-                "http_status": response.status_code,
-                "response": response_data,
-                "status_callback": EXOTEL_STATUS_CALLBACK_URL,
-                "initiated_at": datetime.utcnow()
+            response_data = {
+                "raw_response": response.text[:2000]
             }
 
         # -------------------------------------------------
-        # EXOTEL API ERROR
+        # API FAILURE
         # -------------------------------------------------
 
+        if not response.ok:
+            return {
+                "success": False,
+                "provider": "exotel",
+                "mode": "live",
+                "queue_id": queue_id,
+                "attempt_id": attempt_id,
+                "http_status": response.status_code,
+                "message": "Exotel API request failed",
+                "retryable": (
+                    response.status_code == 408
+                    or response.status_code == 429
+                    or response.status_code >= 500
+                ),
+                "response": response_data
+            }
+
+        # -------------------------------------------------
+        # EXTRACT REAL CALL SID
+        # -------------------------------------------------
+
+        call_info = {}
+
+        if isinstance(response_data, dict):
+            call_info = response_data.get("Call", {})
+
+        call_id = (
+            call_info.get("Sid")
+            if isinstance(call_info, dict)
+            else None
+        )
+
+        # Never generate a fake call ID for a live request.
+        if not call_id:
+            return {
+                "success": False,
+                "provider": "exotel",
+                "mode": "live",
+                "queue_id": queue_id,
+                "attempt_id": attempt_id,
+                "http_status": response.status_code,
+                "message": (
+                    "Exotel returned a successful HTTP response "
+                    "but no Call SID was found."
+                ),
+                "retryable": False,
+                "response": response_data
+            }
+
+        return {
+            "success": True,
+            "provider": "exotel",
+            "mode": "live",
+            "call_id": call_id,
+            "queue_id": queue_id,
+            "attempt_id": attempt_id,
+            "phone": phone,
+            "caller_id": EXOTEL_CALLER_ID,
+            "status": (
+                call_info.get("Status", "initiated")
+                if isinstance(call_info, dict)
+                else "initiated"
+            ),
+            "http_status": response.status_code,
+            "response": response_data,
+            "status_callback": EXOTEL_STATUS_CALLBACK_URL,
+            "stream_url_configured": True,
+            "initiated_at": utc_now()
+        }
+
+    # -------------------------------------------------
+    # NETWORK / TIMEOUT ERROR
+    # -------------------------------------------------
+
+    except requests.Timeout:
         return {
             "success": False,
             "provider": "exotel",
             "mode": "live",
             "queue_id": queue_id,
             "attempt_id": attempt_id,
-            "http_status": response.status_code,
-            "message": "Exotel API request failed",
-            "retryable": response.status_code >= 500,
-            "response": response_data
+            "message": "Exotel request timed out",
+            "retryable": True
         }
 
-    # -------------------------------------------------
-    # NETWORK ERROR
-    # -------------------------------------------------
-
     except requests.RequestException as exc:
-
         return {
             "success": False,
             "provider": "exotel",
@@ -292,112 +383,87 @@ def get_call_status(call_id: str):
     """
     Fetch call details from Exotel.
 
-    This acts as a fallback if the status callback
-    is delayed or unavailable.
+    This is a fallback to the status callback.
     """
-
-    # -------------------------------------------------
-    # VALIDATE CALL ID
-    # -------------------------------------------------
 
     if not call_id:
         return {
             "success": False,
             "provider": "exotel",
-            "message": "Call ID is required"
+            "message": "Call ID is required",
+            "retryable": False
         }
 
-    # -------------------------------------------------
-    # VALIDATE CONFIGURATION
-    # -------------------------------------------------
-
-    if (
-        not EXOTEL_API_KEY
-        or not EXOTEL_API_TOKEN
-        or not EXOTEL_ACCOUNT_SID
-    ):
+    if not all([
+        EXOTEL_API_KEY,
+        EXOTEL_API_TOKEN,
+        EXOTEL_ACCOUNT_SID
+    ]):
         return {
             "success": False,
             "provider": "exotel",
-            "message": "Exotel configuration is incomplete"
+            "message": "Exotel configuration is incomplete",
+            "retryable": False
         }
 
-    # -------------------------------------------------
-    # EXOTEL CALL DETAILS ENDPOINT
-    # -------------------------------------------------
-
-    exotel_url = (
-        f"{EXOTEL_BASE_URL}"
-        f"/v1/Accounts/{EXOTEL_ACCOUNT_SID}"
-        f"/Calls.json"
-    )
-
-    params = {
-        "Sid": call_id
-    }
-
-    # -------------------------------------------------
-    # REQUEST
-    # -------------------------------------------------
+    url = f"{exotel_calls_url()}.json"
 
     try:
-
         response = requests.get(
-            exotel_url,
+            url,
             auth=(
                 EXOTEL_API_KEY,
                 EXOTEL_API_TOKEN
             ),
-            params=params,
+            params={
+                "Sid": call_id
+            },
             headers={
                 "Accept": "application/json"
             },
-            timeout=30
+            timeout=REQUEST_TIMEOUT
         )
-
-        # -------------------------------------------------
-        # PARSE RESPONSE
-        # -------------------------------------------------
 
         try:
             response_data = response.json()
         except ValueError:
-            response_data = response.text
+            response_data = {
+                "raw_response": response.text[:2000]
+            }
 
-        # -------------------------------------------------
-        # SUCCESS
-        # -------------------------------------------------
-
-        if response.ok:
-
+        if not response.ok:
             return {
-                "success": True,
+                "success": False,
                 "provider": "exotel",
                 "call_id": call_id,
                 "http_status": response.status_code,
+                "message": "Unable to fetch call status from Exotel",
+                "retryable": (
+                    response.status_code == 408
+                    or response.status_code == 429
+                    or response.status_code >= 500
+                ),
                 "response": response_data
             }
 
-        # -------------------------------------------------
-        # API ERROR
-        # -------------------------------------------------
+        return {
+            "success": True,
+            "provider": "exotel",
+            "call_id": call_id,
+            "http_status": response.status_code,
+            "response": response_data
+        }
 
+    except requests.Timeout:
         return {
             "success": False,
             "provider": "exotel",
             "call_id": call_id,
-            "http_status": response.status_code,
-            "message": "Unable to fetch call status from Exotel",
-            "retryable": response.status_code >= 500,
-            "response": response_data
+            "message": "Exotel status request timed out",
+            "retryable": True
         }
 
-    # -------------------------------------------------
-    # NETWORK ERROR
-    # -------------------------------------------------
-
     except requests.RequestException as exc:
-
         return {
             "success": False,
             "provider": "exotel",
@@ -414,33 +480,24 @@ def get_call_status(call_id: str):
 
 def end_call(call_id: str):
     """
-    End-call placeholder.
+    Call termination is intentionally not implemented here.
 
-    The current outbound integration primarily relies
-    on Exotel's call lifecycle and terminal callback.
+    Do not mark a call as ended locally and claim that
+    Exotel terminated it. The actual termination mechanism
+    must be implemented against the enabled Exotel product
+    and confirmed with its API documentation.
+
+    Until then, use Exotel terminal callbacks to update
+    the actual call state.
     """
-
-    # -------------------------------------------------
-    # VALIDATE CALL ID
-    # -------------------------------------------------
 
     if not call_id:
         return {
             "success": False,
             "provider": "exotel",
-            "message": "Call ID is required"
+            "message": "Call ID is required",
+            "retryable": False
         }
-
-    # -------------------------------------------------
-    # IMPORTANT
-    # -------------------------------------------------
-    #
-    # We are not pretending that the call was actually
-    # terminated at Exotel.
-    #
-    # Actual terminal state should come from Exotel's
-    # status callback / Call Details API.
-    #
 
     return {
         "success": False,
@@ -448,8 +505,7 @@ def end_call(call_id: str):
         "call_id": call_id,
         "message": (
             "Direct call termination is not implemented. "
-            "Use Exotel terminal status callback or "
-            "Call Details API."
+            "Wait for Exotel terminal callback."
         ),
         "retryable": False
     }
