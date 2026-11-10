@@ -7,3 +7,4 @@ google-genai
 requests
 pydantic
 psycopg[binary]
+audioop-lts
