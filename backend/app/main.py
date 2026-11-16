@@ -2211,3 +2211,12 @@ def schedule_callback_endpoint(
 
     return result
 
+
+
+# =====================================================
+# EXOTEL AGENTSTREAM WEBSOCKET
+# =====================================================
+
+from app.telephony.agentstream import router as agentstream_router
+
+app.include_router(agentstream_router)

@@ -1,5 +1,4 @@
-
-"""Per-call conversation lifecycle management."""
+﻿"""Per-call conversation lifecycle management."""
 
 import asyncio
 from dataclasses import dataclass, field
@@ -10,6 +9,10 @@ from app.ai.gemini_live import GeminiLiveSession
 from app.telephony.audio_converter import AudioConverter
 
 
+EXOTEL_MIN_CHUNK_BYTES = 3200
+EXOTEL_MAX_CHUNK_BYTES = 100000
+
+
 @dataclass
 class CallConversation:
     call_id: str
@@ -17,27 +20,21 @@ class CallConversation:
     gemini: GeminiLiveSession
     attempt_id: Optional[int] = None
 
-    audio_converter: AudioConverter = field(
-        default_factory=AudioConverter
-    )
+    audio_converter: AudioConverter = field(default_factory=AudioConverter)
     started_at: datetime = field(
         default_factory=lambda: datetime.now(timezone.utc)
     )
     connected: bool = False
     closed: bool = False
-    audio_lock: asyncio.Lock = field(
-        default_factory=asyncio.Lock
-    )
+    audio_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    outbound_buffer: bytearray = field(default_factory=bytearray)
     inbound_audio_bytes: int = 0
     outbound_audio_bytes: int = 0
 
 
 class ConversationManager:
 
-    def __init__(
-        self,
-        gemini_factory: Optional[Callable] = None,
-    ):
+    def __init__(self, gemini_factory: Optional[Callable] = None):
         self._sessions: dict[str, CallConversation] = {}
         self._lock = asyncio.Lock()
         self._gemini_factory = gemini_factory or GeminiLiveSession
@@ -55,13 +52,14 @@ class ConversationManager:
         if queue_id <= 0:
             raise ValueError("queue_id must be positive.")
 
+        if attempt_id is not None and attempt_id <= 0:
+            raise ValueError("attempt_id must be positive.")
+
         call_id = call_id.strip()
 
         async with self._lock:
             if call_id in self._sessions:
-                raise RuntimeError(
-                    f"Conversation already exists: {call_id}"
-                )
+                raise RuntimeError(f"Conversation already exists: {call_id}")
 
             conversation = CallConversation(
                 call_id=call_id,
@@ -93,18 +91,14 @@ class ConversationManager:
     def get_call(self, call_id: str):
         return self._sessions.get(call_id)
 
-    async def send_exotel_audio(
-        self,
-        call_id: str,
-        audio: bytes,
-    ) -> int:
-
+    async def send_exotel_audio(self, call_id: str, audio: bytes) -> int:
         conversation = self._get_connected_call(call_id)
 
         async with conversation.audio_lock:
-            converted = conversation.audio_converter.exotel_to_gemini(
-                audio
-            )
+            if conversation.closed:
+                return 0
+
+            converted = conversation.audio_converter.exotel_to_gemini(audio)
 
             if converted:
                 await conversation.gemini.send_audio(converted)
@@ -114,7 +108,11 @@ class ConversationManager:
 
     async def send_text(self, call_id: str, text: str) -> None:
         conversation = self._get_connected_call(call_id)
-        await conversation.gemini.send_text(text)
+
+        async with conversation.audio_lock:
+            if conversation.closed:
+                raise RuntimeError("Conversation is closed.")
+            await conversation.gemini.send_text(text)
 
     async def receive_gemini_audio(
         self,
@@ -132,15 +130,37 @@ class ConversationManager:
                     break
 
                 async with conversation.audio_lock:
-                    converted = (
-                        conversation.audio_converter.gemini_to_exotel(
-                            chunk
-                        )
+                    if conversation.closed:
+                        break
+
+                    converted = conversation.audio_converter.gemini_to_exotel(
+                        chunk
                     )
 
                     if converted:
+                        conversation.outbound_buffer.extend(converted)
                         conversation.outbound_audio_bytes += len(converted)
-                        yield converted
+
+                    ready_chunks = []
+
+                    while len(conversation.outbound_buffer) >= EXOTEL_MIN_CHUNK_BYTES:
+                        chunk_size = min(
+                            len(conversation.outbound_buffer),
+                            EXOTEL_MAX_CHUNK_BYTES,
+                        )
+
+                        chunk_size -= chunk_size % 320
+
+                        if chunk_size < EXOTEL_MIN_CHUNK_BYTES:
+                            break
+
+                        ready_chunks.append(
+                            bytes(conversation.outbound_buffer[:chunk_size])
+                        )
+                        del conversation.outbound_buffer[:chunk_size]
+
+                for ready_chunk in ready_chunks:
+                    yield ready_chunk
 
     async def end_call(self, call_id: str) -> bool:
 
@@ -150,11 +170,17 @@ class ConversationManager:
         if conversation is None:
             return False
 
-        conversation.closed = True
-        conversation.connected = False
-        conversation.audio_converter.reset()
+        async with conversation.audio_lock:
+            conversation.closed = True
+            conversation.connected = False
+            conversation.outbound_buffer.clear()
+            conversation.audio_converter.reset()
 
-        await conversation.gemini.close()
+        try:
+            await conversation.gemini.close()
+        finally:
+            conversation.closed = True
+
         return True
 
     async def close_all(self) -> None:
@@ -181,8 +207,6 @@ class ConversationManager:
             raise KeyError(f"Unknown call: {call_id}")
 
         if conversation.closed or not conversation.connected:
-            raise RuntimeError(
-                f"Conversation is not connected: {call_id}"
-            )
+            raise RuntimeError(f"Conversation is not connected: {call_id}")
 
         return conversation
