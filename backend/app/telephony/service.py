@@ -1,6 +1,7 @@
 
 from datetime import datetime, timezone
 from uuid import uuid4
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 import os
 import re
 
@@ -32,24 +33,18 @@ EXOTEL_API_TOKEN = os.getenv("EXOTEL_API_TOKEN")
 EXOTEL_ACCOUNT_SID = os.getenv("EXOTEL_ACCOUNT_SID")
 EXOTEL_CALLER_ID = os.getenv("EXOTEL_CALLER_ID")
 
-# India region by default. Override only if your account
-# is hosted in another Exotel region.
 EXOTEL_BASE_URL = os.getenv(
     "EXOTEL_BASE_URL",
     "https://api.in.exotel.com"
 ).rstrip("/")
 
-# Public WebSocket endpoint for Exotel AgentStream.
-# Example: wss://your-domain.com/api/v1/telephony/agentstream
 EXOTEL_STREAM_URL = os.getenv("EXOTEL_STREAM_URL")
 
-# Public HTTP endpoint for Exotel status callbacks.
 EXOTEL_STATUS_CALLBACK_URL = os.getenv(
     "EXOTEL_STATUS_CALLBACK_URL"
 )
 
-# Keep mock as the safe default. Set live explicitly only
-# after credentials, stream endpoint and account are verified.
+# Safe default: mock
 TELEPHONY_MODE = os.getenv(
     "TELEPHONY_MODE",
     "mock"
@@ -77,10 +72,13 @@ def utc_now():
 
 def is_valid_e164(phone: str) -> bool:
     """Validate an international E.164 phone number."""
+
     if not phone:
         return False
 
-    return bool(re.fullmatch(r"\+[1-9]\d{7,14}", phone.strip()))
+    return bool(
+        re.fullmatch(r"\+[1-9]\d{7,14}", phone.strip())
+    )
 
 
 def exotel_configuration_error():
@@ -105,7 +103,9 @@ def exotel_configuration_error():
             + ", ".join(missing)
         )
 
-    if not EXOTEL_STREAM_URL.startswith("wss://"):
+    parsed = urlsplit(EXOTEL_STREAM_URL)
+
+    if parsed.scheme != "wss" or not parsed.netloc:
         return "EXOTEL_STREAM_URL must use a public wss:// URL"
 
     if len(EXOTEL_STREAM_URL) > 600:
@@ -121,6 +121,40 @@ def exotel_calls_url():
     )
 
 
+def build_agentstream_url(queue_id: int, attempt_id: int) -> str:
+    """
+    Add call metadata to the public AgentStream WebSocket URL.
+    Existing query parameters are preserved.
+    """
+
+    if not EXOTEL_STREAM_URL:
+        raise RuntimeError("EXOTEL_STREAM_URL is not configured.")
+
+    parsed = urlsplit(EXOTEL_STREAM_URL)
+
+    query = [
+        (key, value)
+        for key, value in parse_qsl(
+            parsed.query,
+            keep_blank_values=True
+        )
+        if key not in {"queue_id", "attempt_id"}
+    ]
+
+    query.extend([
+        ("queue_id", str(queue_id)),
+        ("attempt_id", str(attempt_id)),
+    ])
+
+    return urlunsplit((
+        parsed.scheme,
+        parsed.netloc,
+        parsed.path,
+        urlencode(query),
+        parsed.fragment
+    ))
+
+
 # =====================================================
 # INITIATE OUTBOUND AI CALL
 # =====================================================
@@ -133,13 +167,8 @@ def initiate_call(
     """
     Initiate an outbound AI call using Exotel Connect Voice AI.
 
-    Exotel calls the customer number in `From`, displays
-    the ExoPhone in `CallerId`, and connects the answered
-    call to the public bidirectional AgentStream WebSocket.
-
-    Important:
-    This function starts the telephony call. It does not
-    implement the AgentStream WebSocket server itself.
+    This function starts the telephony call.
+    It does not implement the AgentStream WebSocket server.
     """
 
     # -------------------------------------------------
@@ -203,7 +232,7 @@ def initiate_call(
         }
 
     # -------------------------------------------------
-    # EXOTEL CONFIGURATION VALIDATION
+    # CONFIGURATION VALIDATION
     # -------------------------------------------------
 
     config_error = exotel_configuration_error()
@@ -228,16 +257,15 @@ def initiate_call(
         f"{EXOTEL_ACCOUNT_SID}/Calls/connect"
     )
 
-    # Exotel Connect Voice AI API:
-    # From       = customer number to dial
-    # CallerId   = Exotel virtual number
-    # StreamUrl  = public AgentStream WebSocket
-    # StreamType = bidirectional
+    stream_url = build_agentstream_url(
+        queue_id=queue_id,
+        attempt_id=attempt_id
+    )
 
     payload = {
         "From": phone,
         "CallerId": EXOTEL_CALLER_ID,
-        "StreamUrl": EXOTEL_STREAM_URL,
+        "StreamUrl": stream_url,
         "StreamType": "bidirectional",
         "TimeLimit": EXOTEL_TIME_LIMIT,
         "CustomField": f"queue:{queue_id};attempt:{attempt_id}",
@@ -287,8 +315,7 @@ def initiate_call(
                 "http_status": response.status_code,
                 "message": "Exotel API request failed",
                 "retryable": (
-                    response.status_code == 408
-                    or response.status_code == 429
+                    response.status_code in (408, 429)
                     or response.status_code >= 500
                 ),
                 "response": response_data
@@ -309,7 +336,6 @@ def initiate_call(
             else None
         )
 
-        # Never generate a fake call ID for a live request.
         if not call_id:
             return {
                 "success": False,
@@ -374,6 +400,18 @@ def initiate_call(
             "error": str(exc)
         }
 
+    except (TypeError, ValueError) as exc:
+        return {
+            "success": False,
+            "provider": "exotel",
+            "mode": "live",
+            "queue_id": queue_id,
+            "attempt_id": attempt_id,
+            "message": "Invalid AgentStream URL configuration",
+            "retryable": False,
+            "error": str(exc)
+        }
+
 
 # =====================================================
 # GET CALL STATUS
@@ -382,7 +420,6 @@ def initiate_call(
 def get_call_status(call_id: str):
     """
     Fetch call details from Exotel.
-
     This is a fallback to the status callback.
     """
 
@@ -439,8 +476,7 @@ def get_call_status(call_id: str):
                 "http_status": response.status_code,
                 "message": "Unable to fetch call status from Exotel",
                 "retryable": (
-                    response.status_code == 408
-                    or response.status_code == 429
+                    response.status_code in (408, 429)
                     or response.status_code >= 500
                 ),
                 "response": response_data
@@ -480,15 +516,9 @@ def get_call_status(call_id: str):
 
 def end_call(call_id: str):
     """
-    Call termination is intentionally not implemented here.
+    Direct call termination is not implemented here.
 
-    Do not mark a call as ended locally and claim that
-    Exotel terminated it. The actual termination mechanism
-    must be implemented against the enabled Exotel product
-    and confirmed with its API documentation.
-
-    Until then, use Exotel terminal callbacks to update
-    the actual call state.
+    Wait for Exotel terminal callbacks to update actual state.
     """
 
     if not call_id:
